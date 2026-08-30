@@ -4,7 +4,7 @@ import requests
 
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-MODEL = "qwen/qwen3-32b"  # swap to "gemma2-9b-it" if you'd rather use Gemma
+MODEL = "qwen/qwen3.8-27b"  # swap to "gemma2-9b-it" if you'd rather use Gemma
 
 
 def load_plan_summary():
