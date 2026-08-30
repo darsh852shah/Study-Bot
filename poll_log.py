@@ -24,7 +24,8 @@ STRICT_LOG_HELP = (
 def get_last_offset():
     try:
         with open(OFFSET_FILE) as f:
-            return int(f.read().strip())
+            content = f.read().strip()
+            return int(content) if content else None
     except FileNotFoundError:
         return None
 
