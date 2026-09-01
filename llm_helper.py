@@ -6,7 +6,7 @@ GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 # NOTE: qwen/qwen3-32b (what this was likely meant to be) is being deprecated by Groq —
 # openai/gpt-oss-120b is their recommended free-tier replacement and works well for this use case.
-MODEL = "qwen/qwen3.8-27b"
+MODEL = "moonshotai/kimi-k2-instruct"
 
 
 def load_plan_summary():
@@ -122,7 +122,8 @@ def generate_text(system_prompt, user_prompt, max_tokens=220):
     }
     r = requests.post(GROQ_URL, headers=headers, json=payload, timeout=30)
     r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"].strip()
+    raw = r.json()["choices"][0]["message"]["content"].strip()
+    return _strip_reasoning(raw)
 
 
 EXTRACT_SYSTEM_PROMPT = """You extract structured study-log data from a CA Final student's message. The message may be typed text or a transcribed voice note, and may be casual, rambling, or use filler words (voice transcripts often do).
