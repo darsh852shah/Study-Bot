@@ -121,7 +121,7 @@ def generate_text(system_prompt, user_prompt, max_tokens=220):
         timeout=30,
     )
     r.raise_for_status()
-    return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+    return _strip_reasoning(r.json()["candidates"][0]["content"]["parts"][0]["text"])
 
 
 EXTRACT_SYSTEM_PROMPT = """You extract structured study-log data from a CA Final student's message. The message may be typed text or a transcribed voice note, and may be casual, rambling, or use filler words (voice transcripts often do).
