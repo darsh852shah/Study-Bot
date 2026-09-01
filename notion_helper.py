@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 from datetime import datetime, timezone, timedelta
 
@@ -192,11 +193,29 @@ def get_recent_entries(days=5):
     return r.json().get("results", [])
 
 
+_DURATION_RE = re.compile(r"(?:(\d+(?:\.\d+)?)\s*h)?\s*(?:(\d+)\s*m)?", re.IGNORECASE)
+
+
+def parse_duration_minutes(duration_text):
+    """Parses your Lecture Tracker's Duration text (e.g. '1h 49m', '50m', '2h') into
+    total minutes. Returns 0 for blank/unrecognized text rather than raising, since a
+    stats rollup shouldn't die over one malformed row."""
+    if not duration_text or not duration_text.strip():
+        return 0
+    match = _DURATION_RE.search(duration_text.strip())
+    if not match or (not match.group(1) and not match.group(2)):
+        return 0
+    hours = float(match.group(1)) if match.group(1) else 0.0
+    minutes = int(match.group(2)) if match.group(2) else 0
+    return round(hours * 60 + minutes)
+
+
 def get_lecture_stats():
     """Fetches every row of the Lecture Tracker DB and rolls it up per Subject (FR/AFM):
-    total lectures, how many are Watched vs Not started, and which chapters are still
-    untouched (so the query handler can suggest what's next). Returns None if the
-    NOTION_LECTURE_DB_ID env var isn't set, so this feature is fully optional."""
+    lecture counts (Watched vs Not started), total watched/remaining time (parsed from the
+    Duration column, e.g. '1h 49m'), and which chapters are still untouched — so the query
+    handler can do real pacing math (e.g. hours of FR left vs days to Nov 30), not just a
+    lecture count. Returns None if NOTION_LECTURE_DB_ID isn't set, so this stays optional."""
     if not NOTION_LECTURE_DB_ID:
         return None
 
@@ -223,13 +242,22 @@ def get_lecture_stats():
         subject = (props.get("Subject", {}).get("select") or {}).get("name") or "Other"
         status = (props.get("Status", {}).get("select") or {}).get("name") or "Not started"
         chapter = "".join(t.get("plain_text", "") for t in props.get("Chapter Name", {}).get("title", []))
+        duration_text = "".join(t.get("plain_text", "") for t in props.get("Duration", {}).get("rich_text", []))
+        minutes = parse_duration_minutes(duration_text)
 
-        s = stats.setdefault(subject, {"watched": 0, "total": 0, "not_started_chapters": []})
+        s = stats.setdefault(subject, {
+            "watched": 0, "total": 0,
+            "watched_minutes": 0, "remaining_minutes": 0,
+            "not_started_chapters": [],
+        })
         s["total"] += 1
         if status == "Watched":
             s["watched"] += 1
-        elif chapter and chapter not in s["not_started_chapters"]:
-            s["not_started_chapters"].append(chapter)
+            s["watched_minutes"] += minutes
+        else:
+            s["remaining_minutes"] += minutes
+            if chapter and chapter not in s["not_started_chapters"]:
+                s["not_started_chapters"].append(chapter)
 
     return stats
 

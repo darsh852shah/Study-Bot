@@ -29,7 +29,12 @@ def format_lecture_stats(stats, max_chapters=6):
     lines = []
     for subject, s in stats.items():
         pct = round(100 * s["watched"] / s["total"], 1) if s["total"] else 0.0
-        lines.append(f"{subject}: {s['watched']}/{s['total']} lectures watched ({pct}%)")
+        watched_hrs = round(s["watched_minutes"] / 60, 1)
+        remaining_hrs = round(s["remaining_minutes"] / 60, 1)
+        lines.append(
+            f"{subject}: {s['watched']}/{s['total']} lectures watched ({pct}%) — "
+            f"{watched_hrs}h watched, {remaining_hrs}h remaining"
+        )
         remaining = s["not_started_chapters"][:max_chapters]
         if remaining:
             more = f" (+{len(s['not_started_chapters']) - max_chapters} more)" if len(s["not_started_chapters"]) > max_chapters else ""
