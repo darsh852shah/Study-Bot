@@ -6,7 +6,7 @@ GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 # NOTE: qwen/qwen3-32b (what this was likely meant to be) is being deprecated by Groq —
 # openai/gpt-oss-120b is their recommended free-tier replacement and works well for this use case.
-MODEL = "qwen/qwen3.6-27b"
+MODEL = "qwen/qwen3.8-27b"
 
 
 def load_plan_summary():
