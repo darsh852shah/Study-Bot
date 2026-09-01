@@ -2,11 +2,9 @@ import os
 import json
 import requests
 
-GROQ_API_KEY = os.environ["GROQ_API_KEY"]
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-# NOTE: qwen/qwen3-32b (what this was likely meant to be) is being deprecated by Groq —
-# openai/gpt-oss-120b is their recommended free-tier replacement and works well for this use case.
-MODEL = "qwen/qwen3.6-27b"
+GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+MODEL = "gemini-2.0-flash"  # Free tier; alternatives: gemini-1.5-flash, gemini-1.5-flash-8b
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent"
 
 
 def load_plan_summary():
@@ -107,22 +105,23 @@ def format_logs(entries):
 
 
 def generate_text(system_prompt, user_prompt, max_tokens=220):
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json",
-    }
     payload = {
-        "model": MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "max_tokens": max_tokens,
-        "temperature": 0.7,
+        "system_instruction": {"parts": [{"text": system_prompt}]},
+        "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+        "generationConfig": {
+            "maxOutputTokens": max_tokens,
+            "temperature": 0.7,
+        },
     }
-    r = requests.post(GROQ_URL, headers=headers, json=payload, timeout=30)
+    r = requests.post(
+        GEMINI_URL,
+        params={"key": GEMINI_API_KEY},
+        headers={"Content-Type": "application/json"},
+        json=payload,
+        timeout=30,
+    )
     r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"].strip()
+    return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
 
 
 EXTRACT_SYSTEM_PROMPT = """You extract structured study-log data from a CA Final student's message. The message may be typed text or a transcribed voice note, and may be casual, rambling, or use filler words (voice transcripts often do).
