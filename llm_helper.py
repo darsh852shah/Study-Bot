@@ -119,6 +119,8 @@ def generate_text(system_prompt, user_prompt, max_tokens=220):
         ],
         "max_tokens": max_tokens,
         "temperature": 0.7,
+        "reasoning_effort": "low",   # light chain-of-thought — one step above instruct mode
+        "reasoning_format": "hidden", # suppresses <think> tags at API level
     }
     r = requests.post(GROQ_URL, headers=headers, json=payload, timeout=30)
     r.raise_for_status()
