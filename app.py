@@ -95,12 +95,29 @@ def route_update(update):
     if not incoming_text:
         return  # sticker, photo, empty message, etc.
 
-    # Commands, and any message while a log draft is mid-confirmation, always go through
-    # the existing log flow untouched — never reclassified as a conversational query.
-    if incoming_text.startswith("/") or STATE["pending"] is not None:
+    # Commands always go through the existing log flow untouched.
+    if incoming_text.startswith("/"):
         STATE["pending"] = poll_log.process_update(update, STATE["pending"], incoming_text=incoming_text)
         return
 
+    lowered = incoming_text.lower().strip(" .!")
+
+    # These exact reserved phrases only ever make sense as continuing/ending a draft that's
+    # already in progress — handle them without ever asking the classifier, so "yes"/"cancel"
+    # can't accidentally get read as a question.
+    reserved_continuation = STATE["pending"] is not None and (
+        lowered in poll_log.CONFIRM_WORDS
+        or lowered in poll_log.CANCEL_WORDS
+        or poll_log.match_new_log_trigger(incoming_text) is not None
+    )
+    if reserved_continuation:
+        STATE["pending"] = poll_log.process_update(update, STATE["pending"], incoming_text=incoming_text)
+        return
+
+    # Everything else gets classified fresh, every time — a pending draft does NOT force
+    # the next message to be treated as a correction to it. This is the fix for the bug
+    # where an empty/misfired draft would silently swallow every message after it,
+    # including unrelated questions.
     intent = classify_intent(incoming_text)
 
     if intent == "log":
@@ -113,6 +130,11 @@ def route_update(update):
         reply = answer_query(incoming_text, chat_history=STATE["chat_history"])
     except Exception as e:
         reply = f"⚠️ Couldn't work that out just now ({e}). Try asking again in a moment."
+    if STATE["pending"] is not None:
+        reply += (
+            "\n\n_(By the way, you've still got an unsaved log draft from earlier — "
+            "reply \"yes\" to save it or \"cancel\" to discard it.)_"
+        )
     add_to_history("assistant", reply)
     send_message(reply)
 

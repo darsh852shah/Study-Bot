@@ -46,15 +46,36 @@ QUERY: the message is a question, or is asking for help, analysis, or a plan —
 When genuinely ambiguous, prefer LOG only if it clearly describes activities/hours already done today; otherwise QUERY."""
 
 
+_GREETING_SHORTCUTS = {
+    "hi", "hii", "hey", "heyy", "hello", "yo", "sup", "hola",
+    "good morning", "good evening", "good afternoon", "gm", "morning",
+}
+
+
 def classify_intent(text):
-    """Cheap LLM call that decides whether a free-text message is a study-log entry or a
-    conversational question/plan request. Defaults to \"log\" on failure to preserve the
-    bot's original behavior (treat unrecognized text as a log attempt) if Groq has a hiccup."""
+    """Decides whether a free-text message is a study-log entry or a conversational
+    question/plan request.
+
+    Cheap greetings/questions are caught with a direct check first — reasoning models like
+    gpt-oss-120b can sometimes burn a small token budget on internal reasoning before ever
+    emitting LOG/QUERY, which used to make short ambiguous messages default to "log" and
+    silently start an empty log draft. Defaults to "query" on any failure or ambiguity: a
+    real log message misread as a query just gets a conversational reply (recoverable by
+    re-sending or using /log), whereas a real question misread as "log" used to get trapped
+    answering log-draft prompts instead — a worse outcome, so the safer default flipped."""
+    stripped = text.strip().lower().strip(" !.?")
+    if stripped in _GREETING_SHORTCUTS or text.strip().endswith("?"):
+        return "query"
+
     try:
-        raw = generate_text(CLASSIFY_SYSTEM_PROMPT, f'Message: "{text}"', max_tokens=5)
+        raw = generate_text(CLASSIFY_SYSTEM_PROMPT, f'Message: "{text}"', max_tokens=20)
     except Exception:
+        return "query"
+
+    upper = raw.strip().upper()
+    if "LOG" in upper and "QUERY" not in upper:
         return "log"
-    return "query" if "QUERY" in raw.strip().upper() else "log"
+    return "query"
 
 
 def format_logs(entries):
