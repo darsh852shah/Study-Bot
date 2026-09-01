@@ -4,7 +4,9 @@ import requests
 
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-MODEL = "qwen/qwen3.8-27b"  # swap to "gemma2-9b-it" if you'd rather use Gemma
+# NOTE: qwen/qwen3-32b (what this was likely meant to be) is being deprecated by Groq —
+# openai/gpt-oss-120b is their recommended free-tier replacement and works well for this use case.
+MODEL = "openai/gpt-oss-120b"
 
 
 def load_plan_summary():
@@ -18,6 +20,41 @@ def load_plan_summary():
         pass
     with open("plan_summary.txt") as f:
         return f.read()
+
+
+def format_lecture_stats(stats, max_chapters=6):
+    """Turns notion_helper.get_lecture_stats()'s output into a compact text block for the prompt."""
+    if not stats:
+        return "No lecture tracker data available."
+    lines = []
+    for subject, s in stats.items():
+        pct = round(100 * s["watched"] / s["total"], 1) if s["total"] else 0.0
+        lines.append(f"{subject}: {s['watched']}/{s['total']} lectures watched ({pct}%)")
+        remaining = s["not_started_chapters"][:max_chapters]
+        if remaining:
+            more = f" (+{len(s['not_started_chapters']) - max_chapters} more)" if len(s["not_started_chapters"]) > max_chapters else ""
+            lines.append(f"  Not started yet: {', '.join(remaining)}{more}")
+    return "\n".join(lines)
+
+
+CLASSIFY_SYSTEM_PROMPT = """Classify a CA Final student's Telegram message into exactly one category. Reply with ONLY one word: LOG or QUERY.
+
+LOG: the message is reporting what they did today — activities, hours studied, mood, energy, a win, a distraction, or a fix for tomorrow. Usually past tense, a recap of the day. Also LOG if it's a plain correction/addition to a log already in progress (e.g. "make it 3 hours", "mood was more like a 4").
+
+QUERY: the message is a question, or is asking for help, analysis, or a plan — about their study plan, deadlines, progress, lecture tracker, how they're doing, what to do next, how to catch up, or how to improve. Also QUERY for greetings, small talk, or anything that isn't clearly a same-day activity recap.
+
+When genuinely ambiguous, prefer LOG only if it clearly describes activities/hours already done today; otherwise QUERY."""
+
+
+def classify_intent(text):
+    """Cheap LLM call that decides whether a free-text message is a study-log entry or a
+    conversational question/plan request. Defaults to \"log\" on failure to preserve the
+    bot's original behavior (treat unrecognized text as a log attempt) if Groq has a hiccup."""
+    try:
+        raw = generate_text(CLASSIFY_SYSTEM_PROMPT, f'Message: "{text}"', max_tokens=5)
+    except Exception:
+        return "log"
+    return "query" if "QUERY" in raw.strip().upper() else "log"
 
 
 def format_logs(entries):

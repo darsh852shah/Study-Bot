@@ -133,22 +133,24 @@ def match_new_log_trigger(incoming_text):
 
 # ---- core per-update logic ----
 
-def process_update(update, pending):
-    """Returns the new pending draft (or None) after handling one Telegram update."""
+def process_update(update, pending, incoming_text=None):
+    """Returns the new pending draft (or None) after handling one Telegram update.
+    Pass `incoming_text` if the caller (e.g. app.py's webhook) already extracted/transcribed
+    the message text, so voice notes aren't sent to Groq's Whisper twice."""
     message = update.get("message", {})
     text = message.get("text")
     voice = message.get("voice")
 
-    incoming_text = None
-    if voice:
-        try:
-            audio_bytes = download_voice(voice["file_id"])
-            incoming_text = transcribe_audio(audio_bytes)
-        except Exception as e:
-            send_message(f"⚠️ Couldn't transcribe that voice note: {e}")
-            return pending
-    elif text:
-        incoming_text = text.strip()
+    if incoming_text is None:
+        if voice:
+            try:
+                audio_bytes = download_voice(voice["file_id"])
+                incoming_text = transcribe_audio(audio_bytes)
+            except Exception as e:
+                send_message(f"⚠️ Couldn't transcribe that voice note: {e}")
+                return pending
+        elif text:
+            incoming_text = text.strip()
 
     if not incoming_text:
         return pending  # sticker, photo, empty message, etc. — nothing to do

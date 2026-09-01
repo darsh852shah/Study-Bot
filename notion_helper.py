@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 
 NOTION_API_KEY = os.environ["NOTION_API_KEY"]
 NOTION_DATABASE_ID = os.environ["NOTION_DATABASE_ID"]
+NOTION_LECTURE_DB_ID = os.environ.get("NOTION_LECTURE_DB_ID")  # "Lecture Tracker" database — optional, powers query_handler
 NOTION_VERSION = "2022-06-28"
 
 HEADERS = {
@@ -189,6 +190,48 @@ def get_recent_entries(days=5):
     )
     r.raise_for_status()
     return r.json().get("results", [])
+
+
+def get_lecture_stats():
+    """Fetches every row of the Lecture Tracker DB and rolls it up per Subject (FR/AFM):
+    total lectures, how many are Watched vs Not started, and which chapters are still
+    untouched (so the query handler can suggest what's next). Returns None if the
+    NOTION_LECTURE_DB_ID env var isn't set, so this feature is fully optional."""
+    if not NOTION_LECTURE_DB_ID:
+        return None
+
+    results = []
+    cursor = None
+    while True:
+        payload = {"page_size": 100}
+        if cursor:
+            payload["start_cursor"] = cursor
+        r = requests.post(
+            f"https://api.notion.com/v1/databases/{NOTION_LECTURE_DB_ID}/query",
+            headers=HEADERS, json=payload,
+        )
+        r.raise_for_status()
+        data = r.json()
+        results.extend(data.get("results", []))
+        cursor = data.get("next_cursor")
+        if not data.get("has_more"):
+            break
+
+    stats = {}
+    for page in results:
+        props = page["properties"]
+        subject = (props.get("Subject", {}).get("select") or {}).get("name") or "Other"
+        status = (props.get("Status", {}).get("select") or {}).get("name") or "Not started"
+        chapter = "".join(t.get("plain_text", "") for t in props.get("Chapter Name", {}).get("title", []))
+
+        s = stats.setdefault(subject, {"watched": 0, "total": 0, "not_started_chapters": []})
+        s["total"] += 1
+        if status == "Watched":
+            s["watched"] += 1
+        elif chapter and chapter not in s["not_started_chapters"]:
+            s["not_started_chapters"].append(chapter)
+
+    return stats
 
 
 def get_today_entry():
