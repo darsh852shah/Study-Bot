@@ -3,7 +3,7 @@ import json
 import requests
 
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
-MODEL = "gemini-2.0-flash"  # Free tier; alternatives: gemini-1.5-flash, gemini-1.5-flash-8b
+MODEL = "gemini-3.7-flash"  # Free tier; alternatives: gemini-1.5-flash, gemini-1.5-flash-8b
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent"
 
 
