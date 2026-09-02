@@ -114,6 +114,16 @@ def route_update(update):
         STATE["pending"] = poll_log.process_update(update, STATE["pending"], incoming_text=incoming_text)
         return
 
+    # A pending lecture question (poll_log's disambiguation flow) must also capture the very
+    # next reply unconditionally. Replies like "D18-P1", "skip", "2", or "Class 5" don't read
+    # as a log recap OR a clear question, so classify_intent() tends to default them to QUERY
+    # (see its docstring) — which would silently abandon the in-progress lecture flow and send
+    # the reply to answer_query() instead, e.g. asking the LLM to make sense of "skip" as a
+    # study question. Same fix as reserved_continuation above, one step earlier in the flow.
+    if STATE["pending"] is not None and STATE["pending"].get("lecture_pending"):
+        STATE["pending"] = poll_log.process_update(update, STATE["pending"], incoming_text=incoming_text)
+        return
+
     # Everything else gets classified fresh, every time — a pending draft does NOT force
     # the next message to be treated as a correction to it. This is the fix for the bug
     # where an empty/misfired draft would silently swallow every message after it,
