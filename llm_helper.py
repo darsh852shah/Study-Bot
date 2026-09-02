@@ -125,7 +125,7 @@ def generate_text(system_prompt, user_prompt, max_tokens=220, reasoning_effort="
     }
     r = requests.post(GROQ_URL, headers=headers, json=payload, timeout=30)
     r.raise_for_status()
-    content = (r.json()["choices"][0]["message"].get("content") or "").strip()
+    content = _strip_reasoning((r.json()["choices"][0]["message"].get("content") or "").strip())
     if not content:
         raise RuntimeError(
             "Model returned empty content — likely ran out of tokens while reasoning "
