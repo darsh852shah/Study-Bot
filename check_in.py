@@ -14,18 +14,24 @@ Rules:
 
 def main():
     if get_today_entry():
-        return  # already logged today — no check-in needed
+        print("Already logged today — skipping check-in.")
+        return
 
     plan = load_plan_summary()
     logs = format_logs(get_recent_entries(days=5))
     prompt = f"MASTER PLAN SUMMARY:\n{plan}\n\nRECENT LOGS (most recent first):\n{logs}\n\nWrite the midday check-in."
 
     try:
-        msg = generate_text(SYSTEM_PROMPT, prompt, max_tokens=100)
-    except Exception:
-        return  # fail silently rather than spam a broken message
+        msg = generate_text(SYSTEM_PROMPT, prompt, max_tokens=200)
+    except Exception as e:
+        # Previously failed with zero output — impossible to diagnose from the Actions log.
+        # Print the real reason so the next silent skip is actually visible.
+        print(f"generate_text failed, skipping check-in: {type(e).__name__}: {e}")
+        return
 
+    print(f"Sending check-in: {msg!r}")
     send_message(msg)
+    print("Sent.")
 
 
 if __name__ == "__main__":
