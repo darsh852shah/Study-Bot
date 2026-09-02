@@ -4,8 +4,6 @@ import requests
 
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-# NOTE: qwen/qwen3-32b (what this was likely meant to be) is being deprecated by Groq —
-# openai/gpt-oss-120b is their recommended free-tier replacement and works well for this use case.
 MODEL = "qwen/qwen3.8-27b"
 
 
@@ -73,7 +71,7 @@ def classify_intent(text):
         return "query"
 
     try:
-        raw = generate_text(CLASSIFY_SYSTEM_PROMPT, f'Message: "{text}"', max_tokens=20)
+        raw = generate_text(CLASSIFY_SYSTEM_PROMPT, f'Message: "{text}"', max_tokens=40, reasoning_effort="none")
     except Exception:
         return "query"
 
@@ -106,7 +104,17 @@ def format_logs(entries):
     return "\n".join(lines)
 
 
-def generate_text(system_prompt, user_prompt, max_tokens=220):
+def generate_text(system_prompt, user_prompt, max_tokens=220, reasoning_effort="low"):
+    """reasoning_effort defaults to "low": qwen/qwen3.8-27b supports none/low/medium/high.
+    "none" is the safest against the bug this bot hit (a reasoning model burning max_tokens on
+    internal thinking and leaving `content` empty with no error) — but it also means the model
+    never actually reasons before answering, which costs real quality on tasks that benefit from
+    it: parsing ambiguous/rambling log text, and the pacing/re-planning math in query_handler.py.
+    "low" is a middle ground — some reasoning, without the heavier token cost of medium/high.
+    This is safe to do now because `content` empty is no longer a silent failure: this function
+    raises if it happens, so callers' existing try/except fallbacks trigger properly instead of
+    a blank message going out. Pass reasoning_effort="none" per-call for latency-sensitive spots
+    (e.g. classify_intent) where reasoning adds little value."""
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json",
@@ -119,13 +127,17 @@ def generate_text(system_prompt, user_prompt, max_tokens=220):
         ],
         "max_tokens": max_tokens,
         "temperature": 0.7,
-        "reasoning_effort": "low",   # light chain-of-thought — one step above instruct mode
-        "reasoning_format": "hidden", # suppresses <think> tags at API level
+        "reasoning_effort": reasoning_effort,
     }
     r = requests.post(GROQ_URL, headers=headers, json=payload, timeout=30)
     r.raise_for_status()
-    raw = r.json()["choices"][0]["message"]["content"].strip()
-    return _strip_reasoning(raw)
+    content = (r.json()["choices"][0]["message"].get("content") or "").strip()
+    if not content:
+        raise RuntimeError(
+            "Model returned empty content — likely ran out of tokens while reasoning "
+            "before writing an answer. Try a higher max_tokens."
+        )
+    return content
 
 
 EXTRACT_SYSTEM_PROMPT = """You extract structured study-log data from a CA Final student's message. The message may be typed text or a transcribed voice note, and may be casual, rambling, or use filler words (voice transcripts often do).
@@ -181,5 +193,5 @@ def extract_log_fields(message_text=None, previous_draft=None, correction_text=N
     else:
         user_prompt = f'User\'s message: "{message_text}"\n\nExtract the JSON object.'
 
-    raw = generate_text(EXTRACT_SYSTEM_PROMPT, user_prompt, max_tokens=400)
+    raw = generate_text(EXTRACT_SYSTEM_PROMPT, user_prompt, max_tokens=500)
     return _parse_json_object(raw)

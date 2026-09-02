@@ -123,8 +123,14 @@ def create_log_entry(breakdown, mood, energy, win, broke, fix):
     return r.json()
 
 
-def fetch_plan_text(max_chars=4000):
-    """Fetches the live Master Plan Notion page and flattens it to plain text for LLM context."""
+def fetch_plan_text(max_chars=16000):
+    """Fetches the live Master Plan Notion page and flattens it to plain text for LLM context.
+    max_chars was 4000 — nowhere near enough for this plan (dashboard, 3 tables, phase
+    checklists, daily template, non-negotiables, open items all add up to well over that),
+    so the LLM was silently only ever seeing the first ~40% of the page and never reaching the
+    non-negotiables/deadlines/open-items sections. 16000 chars comfortably fits the whole
+    document today with room for it to grow as a living doc, while still guarding against
+    unbounded growth blowing up the prompt."""
     page_id = os.environ.get("NOTION_PAGE_ID")
     if not page_id:
         return None
