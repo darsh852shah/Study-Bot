@@ -5,8 +5,8 @@ stats from Notion, then asks the LLM to answer/re-plan using ONLY that real data
 way Claude does when you ask it to check your Notion setup, just running inside your own bot.
 """
 
-from notion_helper import fetch_plan_text, get_recent_entries, get_lecture_stats, today_ist
-from llm_helper import format_logs, format_lecture_stats, generate_text
+from notion_helper import get_recent_entries, get_lecture_stats, today_ist
+from llm_helper import load_plan_summary, format_logs, format_lecture_stats, generate_text
 
 QUERY_SYSTEM_PROMPT = """You are a direct, grounded study assistant for a CA Final student, scoped ONLY to their study plan, progress, and how to improve it. You're given their live master plan, their recent daily logs, and their lecture tracker completion stats below — this is the ONLY data you know about their prep. Never invent numbers, deadlines, lecture counts, or plan phases that aren't in what's given to you; if something isn't in the data, say so plainly instead of guessing.
 
@@ -22,7 +22,7 @@ You do NOT rewrite, edit, or update the master plan itself — you only advise t
 def build_context(history_days=14):
     """Assembles the same three sources Claude reviewed in your Notion setup — Master Plan,
     Daily Log, Lecture Tracker — into one text block for the LLM prompt."""
-    plan = fetch_plan_text() or "Master Plan unavailable right now."
+    plan = load_plan_summary() or "Master Plan unavailable right now."
     logs = format_logs(get_recent_entries(days=history_days))
     lecture_text = format_lecture_stats(get_lecture_stats())
     today_str = today_ist().strftime("%A, %d %B %Y")
