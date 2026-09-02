@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import requests
 
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
@@ -108,7 +109,10 @@ def generate_text(system_prompt, user_prompt, max_tokens=220, reasoning_effort="
     """reasoning_effort for qwen/qwen3.6-27b on Groq supports only "none" or "default".
     "none" disables reasoning (faster, lower quality — good for classify_intent).
     "default" enables reasoning (recommended for log extraction, query answering, re-planning).
-    Passing any other value ("low", "medium", "high") causes a 400 Bad Request from the Groq API."""
+    Passing any other value ("low", "medium", "high") causes a 400 Bad Request from the Groq API.
+
+    Retries automatically on 429 (rate limit) with exponential backoff — Groq's free tier
+    has tight limits (~30 req/min) and the bot can hit them with back-to-back calls."""
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json",
@@ -123,8 +127,18 @@ def generate_text(system_prompt, user_prompt, max_tokens=220, reasoning_effort="
         "temperature": 0.7,
         "reasoning_effort": reasoning_effort,
     }
-    r = requests.post(GROQ_URL, headers=headers, json=payload, timeout=30)
-    r.raise_for_status()
+
+    max_retries = 3
+    for attempt in range(max_retries + 1):
+        r = requests.post(GROQ_URL, headers=headers, json=payload, timeout=60)
+        if r.status_code == 429 and attempt < max_retries:
+            # Respect Retry-After header if provided, otherwise exponential backoff
+            wait = float(r.headers.get("Retry-After", 2 ** (attempt + 1)))
+            time.sleep(wait)
+            continue
+        r.raise_for_status()
+        break
+
     content = _strip_reasoning((r.json()["choices"][0]["message"].get("content") or "").strip())
     if not content:
         raise RuntimeError(

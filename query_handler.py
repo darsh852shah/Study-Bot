@@ -88,13 +88,19 @@ def answer_query(user_message, chat_history=None):
     )
     reply = generate_text(QUERY_SYSTEM_PROMPT, user_prompt, max_tokens=4096)
 
-    # Extract and save new memories in the background (best-effort, never blocks the reply)
-    try:
-        _extract_and_save_memories(user_message, reply, get_memories())
-    except Exception:
-        pass  # memory extraction failing should never affect the user's reply
+    # Extract and save new memories every few conversations to conserve API calls.
+    # Groq free tier is ~30 req/min — running this every message adds a 3rd call each time.
+    _query_counter["count"] += 1
+    if _query_counter["count"] % 3 == 0:
+        try:
+            _extract_and_save_memories(user_message, reply, get_memories())
+        except Exception:
+            pass  # memory extraction failing should never affect the user's reply
 
     return reply
+
+
+_query_counter = {"count": 0}  # simple in-memory counter, resets on restart
 
 
 def _extract_and_save_memories(user_message, bot_reply, existing_memories):
