@@ -1,7 +1,11 @@
 import json
+import re
 
 from telegram_helper import get_updates, send_message, download_voice
-from notion_helper import create_log_entry, preview_entry
+from notion_helper import (
+    create_log_entry, preview_entry, parse_activity_breakdown,
+    find_lecture_matches, mark_lecture_watched,
+)
 from llm_helper import extract_log_fields
 from stt_helper import transcribe_audio
 
@@ -11,6 +15,12 @@ PENDING_FILE = "pending_log.json"
 CONFIRM_WORDS = {"yes", "y", "yep", "yeah", "yup", "confirm", "save", "ok", "okay", "correct", "right", "sure"}
 CANCEL_WORDS = {"no", "cancel", "discard", "nvm", "never mind", "scrap", "stop"}
 NEW_LOG_TRIGGERS = ["new log", "new entry", "start over", "start fresh", "reset"]
+
+# Subjects whose Lecture Tracker rows we ask about before saving a log — FR/AFM only, per the
+# user's explicit "Option A" design: skipping this question must NEVER touch the tracker,
+# since logged FR/AFM hours might just be revision rather than a newly-watched lecture.
+LECTURE_TRACKED_SUBJECTS = ("FR", "AFM")
+LECTURE_SKIP_WORDS = {"skip", "no", "none", "n/a", "na", "nothing", "revision", "revised", "revise"}
 
 STRICT_LOG_HELP = (
     "⚠️ Format: `/log activity:hrs,activity:hrs|mood|energy|win|broke|fix`\n"
@@ -84,12 +94,174 @@ def format_confirmation(draft):
     lines.append(f"• Broke focus: {preview['broke'] or '—'}")
     lines.append(f"• Fix for tomorrow: {preview['fix'] or '—'}")
 
+    lecture_results = draft.get("lecture_results") or {}
+    for subject in LECTURE_TRACKED_SUBJECTS:
+        result = lecture_results.get(subject)
+        if not result:
+            continue
+        status = result.get("status")
+        if status == "matched":
+            lines.append(f"• {subject} lecture: {result['chapter']} ({result['lecture']}) → will mark Watched")
+        elif status == "skipped":
+            lines.append(f"• {subject} lecture: none specified (revision) → tracker untouched")
+        elif status == "no_match":
+            lines.append(f"• {subject} lecture: no match found → tracker untouched")
+        elif status == "error":
+            lines.append(f"• {subject} lecture: couldn't check tracker → tracker untouched")
+
     missing = missing_fields(draft)
     if missing:
         lines.append(f"\n⚠️ Couldn't tell your {', '.join(missing)} — reply with that and I'll fill it in.")
     else:
         lines.append("\nReply *yes* to save, or just tell me what to fix.")
     return "\n".join(lines)
+
+
+# ---- lecture-marking flow (Option A): ask which FR/AFM lecture was watched, skip-safe ----
+
+def subjects_needing_lecture_check(breakdown):
+    """Which of FR/AFM appear (with hours) in the parsed breakdown, in a stable order."""
+    if not breakdown:
+        return []
+    _, activity_names, _ = parse_activity_breakdown(breakdown)
+    return [s for s in LECTURE_TRACKED_SUBJECTS if s in activity_names]
+
+
+def lecture_question_text(subject):
+    example = "\"D18-P1\"" if subject == "FR" else "\"Class 5\""
+    return (
+        f"Which {subject} lecture did you watch today? Reply with its name (e.g. {example}), "
+        "or say *skip* if this was revision rather than a new lecture."
+    )
+
+
+def format_disambiguation(subject, candidates):
+    lines = [f"A few {subject} chapters have that lecture — which one did you mean?"]
+    for i, c in enumerate(candidates, 1):
+        lines.append(f"{i}. {c['chapter']}")
+    lines.append("Reply with the number, or type part of the chapter name.")
+    return "\n".join(lines)
+
+
+def maybe_ask_lecture(draft, prefix=""):
+    """Asks about the next unresolved FR/AFM lecture, one subject at a time. Recomputes which
+    subjects are needed from the current breakdown each call, so a later correction that adds
+    FR/AFM hours still gets asked about. Returns True if a question was just sent (caller
+    should stop and wait for the reply rather than showing the save confirmation)."""
+    draft.setdefault("lecture_results", {})
+    queue = draft.setdefault("lecture_queue", [])
+    for subject in subjects_needing_lecture_check(draft.get("breakdown")):
+        if subject not in draft["lecture_results"] and subject not in queue:
+            queue.append(subject)
+
+    while queue:
+        subject = queue[0]
+        if subject in draft["lecture_results"]:
+            queue.pop(0)
+            continue
+        draft["lecture_pending"] = subject
+        send_message(prefix + lecture_question_text(subject))
+        return True
+
+    draft.pop("lecture_pending", None)
+    return False
+
+
+def handle_lecture_answer(draft, incoming_text, lowered):
+    """Handles a reply to the pending lecture question — a skip, a lecture name, or (if a
+    previous answer was ambiguous) a disambiguation pick. Never marks anything Watched itself;
+    it only records the intent in draft['lecture_results'], which is applied for real only
+    after the user confirms the whole log with 'yes' (see apply_lecture_updates)."""
+    subject = draft.get("lecture_pending")
+    results = draft.setdefault("lecture_results", {})
+
+    candidates = draft.get("lecture_disambig_candidates")
+    if candidates:
+        chosen = None
+        if lowered.isdigit():
+            idx = int(lowered) - 1
+            if 0 <= idx < len(candidates):
+                chosen = candidates[idx]
+        if chosen is None:
+            norm = re.sub(r"[^a-z0-9]", "", lowered)
+            hits = [c for c in candidates if norm and norm in re.sub(r"[^a-z0-9]", "", c["chapter"].lower())]
+            if len(hits) == 1:
+                chosen = hits[0]
+        if chosen is None:
+            send_message("Didn't catch which one — reply with the number, or more of the chapter name.")
+            return draft
+        results[subject] = {
+            "status": "matched", "page_id": chosen["page_id"],
+            "chapter": chosen["chapter"], "lecture": chosen["lecture"],
+        }
+        draft.pop("lecture_disambig_candidates", None)
+        draft["lecture_queue"].pop(0)
+        draft.pop("lecture_pending", None)
+        send_message(f"Got it — {chosen['chapter']} ({chosen['lecture']}) will be marked Watched.")
+        if not maybe_ask_lecture(draft):
+            send_message(format_confirmation(draft))
+        return draft
+
+    if lowered.strip(" .!") in LECTURE_SKIP_WORDS:
+        results[subject] = {"status": "skipped"}
+        draft["lecture_queue"].pop(0)
+        draft.pop("lecture_pending", None)
+        if not maybe_ask_lecture(draft):
+            send_message(format_confirmation(draft))
+        return draft
+
+    try:
+        matches = find_lecture_matches(subject, incoming_text)
+    except Exception as e:
+        send_message(f"⚠️ Couldn't check the {subject} tracker ({e}) — logging hours only, tracker untouched.")
+        results[subject] = {"status": "error"}
+        draft["lecture_queue"].pop(0)
+        draft.pop("lecture_pending", None)
+        if not maybe_ask_lecture(draft):
+            send_message(format_confirmation(draft))
+        return draft
+
+    if not matches:
+        send_message(f"No {subject} lecture matching \"{incoming_text}\" found — logging hours only, tracker untouched.")
+        results[subject] = {"status": "no_match"}
+        draft["lecture_queue"].pop(0)
+        draft.pop("lecture_pending", None)
+        if not maybe_ask_lecture(draft):
+            send_message(format_confirmation(draft))
+        return draft
+
+    if len(matches) > 1:
+        draft["lecture_disambig_candidates"] = matches
+        send_message(format_disambiguation(subject, matches))
+        return draft  # still pending — wait for the chapter pick
+
+    chosen = matches[0]
+    results[subject] = {
+        "status": "matched", "page_id": chosen["page_id"],
+        "chapter": chosen["chapter"], "lecture": chosen["lecture"],
+    }
+    draft["lecture_queue"].pop(0)
+    draft.pop("lecture_pending", None)
+    send_message(f"Got it — {chosen['chapter']} ({chosen['lecture']}) will be marked Watched.")
+    if not maybe_ask_lecture(draft):
+        send_message(format_confirmation(draft))
+    return draft
+
+
+def apply_lecture_updates(draft):
+    """Called only after the daily log itself has already saved successfully. Best-effort —
+    a tracker-update failure here is reported but never undoes or blocks the log save."""
+    for subject, result in (draft.get("lecture_results") or {}).items():
+        if result.get("status") != "matched":
+            continue
+        try:
+            mark_lecture_watched(result["page_id"])
+            send_message(f"✅ Marked {subject} — {result['chapter']} ({result['lecture']}) as Watched.")
+        except Exception as e:
+            send_message(
+                f"⚠️ Log saved, but couldn't mark {subject} — {result['chapter']} ({result['lecture']}) "
+                f"as Watched ({e}). You may want to update the tracker manually."
+            )
 
 
 def save_draft(draft):
@@ -176,12 +348,16 @@ def process_update(update, pending, incoming_text=None):
             except Exception as e:
                 send_message(f"{prefix}⚠️ Couldn't parse that ({e}). Try again, or use `/log ...`.")
                 return None
-            send_message(prefix + format_confirmation(draft))
+            if not maybe_ask_lecture(draft, prefix):
+                send_message(prefix + format_confirmation(draft))
             return draft
         send_message(prefix + "Starting fresh — send your log whenever you're ready (voice note or text).")
         return None
 
     if pending:
+        if pending.get("lecture_pending"):
+            return handle_lecture_answer(pending, incoming_text, lowered)
+
         if lowered in CONFIRM_WORDS:
             missing = missing_fields(pending)
             if missing:
@@ -192,6 +368,7 @@ def process_update(update, pending, incoming_text=None):
             except Exception as e:
                 send_message(f"⚠️ Couldn't save that log: {e}")
                 return pending
+            apply_lecture_updates(pending)
             return None
 
         if lowered in CANCEL_WORDS:
@@ -207,7 +384,8 @@ def process_update(update, pending, incoming_text=None):
                 "or try rephrasing the correction."
             )
             return pending
-        send_message(format_confirmation(updated))
+        if not maybe_ask_lecture(updated):
+            send_message(format_confirmation(updated))
         return updated
 
     # No pending draft — this is a fresh free-text or voice log
@@ -219,7 +397,8 @@ def process_update(update, pending, incoming_text=None):
             "or rephrase in plain text or a voice note."
         )
         return None
-    send_message(format_confirmation(draft))
+    if not maybe_ask_lecture(draft):
+        send_message(format_confirmation(draft))
     return draft
 
 

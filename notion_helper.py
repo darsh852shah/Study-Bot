@@ -268,6 +268,78 @@ def get_lecture_stats():
     return stats
 
 
+def _normalize_lecture_text(text):
+    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+
+def find_lecture_matches(subject, lecture_query):
+    """Fuzzy-but-safe match of lecture_query (e.g. 'Class 5', 'D18-P1') against the Lecture
+    Tracker's 'Lecture' text property, scoped to one Subject (FR or AFM). Matching is exact
+    after normalizing case/spaces/punctuation — NOT substring — because a substring match
+    would let 'Class 5' wrongly match a row literally named 'Class 50'. Returns a list of
+    {"page_id", "chapter", "lecture", "duration", "status"} dicts: for FR this is at most one
+    (D#-P# labels are unique), for AFM it can be several (Class N repeats across chapters)."""
+    if not NOTION_LECTURE_DB_ID:
+        return []
+    target = _normalize_lecture_text(lecture_query)
+    if not target:
+        return []
+
+    results = []
+    cursor = None
+    while True:
+        payload = {
+            "filter": {"property": "Subject", "select": {"equals": subject}},
+            "page_size": 100,
+        }
+        if cursor:
+            payload["start_cursor"] = cursor
+        r = requests.post(
+            f"https://api.notion.com/v1/databases/{NOTION_LECTURE_DB_ID}/query",
+            headers=HEADERS, json=payload,
+        )
+        r.raise_for_status()
+        data = r.json()
+        results.extend(data.get("results", []))
+        cursor = data.get("next_cursor")
+        if not data.get("has_more"):
+            break
+
+    matches = []
+    for page in results:
+        props = page["properties"]
+        lecture_text = "".join(t.get("plain_text", "") for t in props.get("Lecture", {}).get("rich_text", []))
+        if _normalize_lecture_text(lecture_text) != target:
+            continue
+        chapter = "".join(t.get("plain_text", "") for t in props.get("Chapter Name", {}).get("title", []))
+        duration = "".join(t.get("plain_text", "") for t in props.get("Duration", {}).get("rich_text", []))
+        status = (props.get("Status", {}).get("select") or {}).get("name") or "Not started"
+        matches.append({
+            "page_id": page["id"],
+            "chapter": chapter,
+            "lecture": lecture_text,
+            "duration": duration,
+            "status": status,
+        })
+    return matches
+
+
+def mark_lecture_watched(page_id):
+    """Marks one Lecture Tracker row Watched with today's date. Best-effort — raises on
+    failure so the caller (poll_log.py) can tell the user the daily log saved fine but the
+    tracker update itself didn't, rather than silently losing it."""
+    date_str = today_ist().strftime("%Y-%m-%d")
+    payload = {
+        "properties": {
+            "Status": {"select": {"name": "Watched"}},
+            "Date completed": {"date": {"start": date_str}},
+        }
+    }
+    r = requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json=payload)
+    r.raise_for_status()
+    return r.json()
+
+
 def get_today_entry():
     """Fetches today's row (if any) from the Daily Log (DB)."""
     date_str = today_ist().strftime("%Y-%m-%d")
