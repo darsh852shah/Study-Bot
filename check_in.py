@@ -22,7 +22,7 @@ def main():
     prompt = f"MASTER PLAN SUMMARY:\n{plan}\n\nRECENT LOGS (most recent first):\n{logs}\n\nWrite the midday check-in."
 
     try:
-        msg = generate_text(SYSTEM_PROMPT, prompt, max_tokens=200)
+        msg = generate_text(SYSTEM_PROMPT, prompt, max_tokens=200, reasoning_effort="none")
     except Exception as e:
         # Previously failed with zero output — impossible to diagnose from the Actions log.
         # Print the real reason so the next silent skip is actually visible.

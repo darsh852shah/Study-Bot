@@ -53,7 +53,7 @@ def main():
         plan = load_plan_summary()
         logs = format_logs(get_recent_entries(days=5))
         user_prompt = f"MASTER PLAN SUMMARY:\n{plan}\n\nRECENT LOGS (most recent first, includes today):\n{logs}\n\nWrite tonight's coaching reflection."
-        coach_msg = generate_text(SYSTEM_PROMPT, user_prompt, max_tokens=120)
+        coach_msg = generate_text(SYSTEM_PROMPT, user_prompt, max_tokens=220, reasoning_effort="none")
         send_message(coach_msg)
     except Exception:
         pass  # stats already sent; coaching line is a bonus, not critical

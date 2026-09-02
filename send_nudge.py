@@ -31,7 +31,7 @@ def main():
     user_prompt = f"MASTER PLAN SUMMARY:\n{plan}\n\nRECENT LOGS (most recent first):\n{logs}\n\nWrite today's morning nudge."
 
     try:
-        body = generate_text(SYSTEM_PROMPT, user_prompt)
+        body = generate_text(SYSTEM_PROMPT, user_prompt, max_tokens=350, reasoning_effort="none")
     except Exception:
         body = (
             "The plan's still live and today's block is waiting on you — "
