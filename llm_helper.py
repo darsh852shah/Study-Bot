@@ -104,17 +104,11 @@ def format_logs(entries):
     return "\n".join(lines)
 
 
-def generate_text(system_prompt, user_prompt, max_tokens=220, reasoning_effort="low"):
-    """reasoning_effort defaults to "low": qwen/qwen3.8-27b supports none/low/medium/high.
-    "none" is the safest against the bug this bot hit (a reasoning model burning max_tokens on
-    internal thinking and leaving `content` empty with no error) — but it also means the model
-    never actually reasons before answering, which costs real quality on tasks that benefit from
-    it: parsing ambiguous/rambling log text, and the pacing/re-planning math in query_handler.py.
-    "low" is a middle ground — some reasoning, without the heavier token cost of medium/high.
-    This is safe to do now because `content` empty is no longer a silent failure: this function
-    raises if it happens, so callers' existing try/except fallbacks trigger properly instead of
-    a blank message going out. Pass reasoning_effort="none" per-call for latency-sensitive spots
-    (e.g. classify_intent) where reasoning adds little value."""
+def generate_text(system_prompt, user_prompt, max_tokens=220, reasoning_effort="default"):
+    """reasoning_effort for qwen/qwen3.6-27b on Groq supports only "none" or "default".
+    "none" disables reasoning (faster, lower quality — good for classify_intent).
+    "default" enables reasoning (recommended for log extraction, query answering, re-planning).
+    Passing any other value ("low", "medium", "high") causes a 400 Bad Request from the Groq API."""
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json",
