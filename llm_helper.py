@@ -207,14 +207,3 @@ def extract_log_fields(message_text=None, previous_draft=None, correction_text=N
         )
     else:
         user_prompt = f'User\'s message: "{message_text}"\n\nExtract the JSON object.'
-
-    raw = generate_text(EXTRACT_SYSTEM_PROMPT, user_prompt, max_tokens=2048)
-    return _parse_json_object(raw)
- follow-up/correction message: "{correction_text}"\n\n'
-            "Output the updated JSON object only."
-        )
-    else:
-        user_prompt = f'User\'s message: "{message_text}"\n\nExtract the JSON object.'
-
-    raw = generate_text(EXTRACT_SYSTEM_PROMPT, user_prompt, max_tokens=2048)
-    return _parse_json_object(raw)
