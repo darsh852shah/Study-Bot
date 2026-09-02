@@ -155,9 +155,16 @@ You may reasonably infer mood/energy from tone and wording (e.g. "felt pretty go
 
 def _strip_reasoning(text):
     """Qwen3 and similar reasoning models sometimes wrap chain-of-thought in <think> tags
-    even when asked for JSON only — strip it defensively before parsing."""
-    if "<think>" in text and "</think>" in text:
-        text = text.split("</think>", 1)[1]
+    even when asked for JSON only — strip it defensively before parsing.
+    Also handles truncated blocks where </think> is missing (model hit max_tokens
+    while still reasoning and never wrote the closing tag or any real answer)."""
+    if "<think>" in text:
+        if "</think>" in text:
+            text = text.split("</think>", 1)[1]
+        else:
+            # Truncated: no closing tag → everything from <think> onward is reasoning.
+            # Keep only any content that appeared before the tag (usually empty).
+            text = text.split("<think>", 1)[0]
     return text.strip()
 
 
@@ -187,5 +194,5 @@ def extract_log_fields(message_text=None, previous_draft=None, correction_text=N
     else:
         user_prompt = f'User\'s message: "{message_text}"\n\nExtract the JSON object.'
 
-    raw = generate_text(EXTRACT_SYSTEM_PROMPT, user_prompt, max_tokens=500)
+    raw = generate_text(EXTRACT_SYSTEM_PROMPT, user_prompt, max_tokens=2048)
     return _parse_json_object(raw)

@@ -57,4 +57,4 @@ def answer_query(user_message, chat_history=None):
         f'Student\'s message just now: "{user_message}"\n\n'
         "Respond as their study assistant."
     )
-    return generate_text(QUERY_SYSTEM_PROMPT, user_prompt, max_tokens=1200)
+    return generate_text(QUERY_SYSTEM_PROMPT, user_prompt, max_tokens=4096)
