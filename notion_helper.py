@@ -6,6 +6,7 @@ from datetime import datetime, timezone, timedelta
 NOTION_API_KEY = os.environ["NOTION_API_KEY"]
 NOTION_DATABASE_ID = os.environ["NOTION_DATABASE_ID"]
 NOTION_LECTURE_DB_ID = os.environ.get("NOTION_LECTURE_DB_ID")  # "Lecture Tracker" database — optional, powers query_handler
+NOTION_MEMORY_DB_ID = os.environ.get("NOTION_MEMORY_DB_ID")    # "Bot Memory" database — optional, gives the bot long-term memory
 NOTION_VERSION = "2022-06-28"
 
 HEADERS = {
@@ -351,3 +352,58 @@ def get_today_entry():
     r.raise_for_status()
     results = r.json().get("results", [])
     return results[0] if results else None
+
+
+# ─── Bot Memory (long-term) ──────────────────────────────────────────────────
+
+
+def get_memories(limit=20):
+    """Fetches the most recent memories from the Bot Memory database, newest first.
+    Returns None if NOTION_MEMORY_DB_ID isn't set (feature is optional)."""
+    if not NOTION_MEMORY_DB_ID:
+        return None
+    payload = {
+        "sorts": [{"property": "Date", "direction": "descending"}],
+        "page_size": limit,
+    }
+    r = requests.post(
+        f"https://api.notion.com/v1/databases/{NOTION_MEMORY_DB_ID}/query",
+        headers=HEADERS, json=payload,
+    )
+    r.raise_for_status()
+    return r.json().get("results", [])
+
+
+def save_memory(memory_text, category="insight", source="bot-inferred"):
+    """Saves a single memory to the Bot Memory database. Does nothing if
+    NOTION_MEMORY_DB_ID isn't set."""
+    if not NOTION_MEMORY_DB_ID:
+        return None
+    date_str = today_ist().strftime("%Y-%m-%d")
+    payload = {
+        "parent": {"database_id": NOTION_MEMORY_DB_ID},
+        "properties": {
+            "Memory": {"title": [{"text": {"content": memory_text}}]},
+            "Category": {"select": {"name": category}},
+            "Source": {"select": {"name": source}},
+            "Date": {"date": {"start": date_str}},
+        },
+    }
+    r = requests.post("https://api.notion.com/v1/pages", headers=HEADERS, json=payload)
+    r.raise_for_status()
+    return r.json()
+
+
+def format_memories(memories):
+    """Turns get_memories() output into a compact text block for injection into LLM prompts."""
+    if not memories:
+        return "No long-term memories stored yet."
+    lines = []
+    for m in memories:
+        props = m["properties"]
+        text = "".join(t.get("plain_text", "") for t in props["Memory"]["title"])
+        cat = (props.get("Category", {}).get("select") or {}).get("name", "")
+        date_obj = props.get("Date", {}).get("date")
+        date = date_obj["start"] if date_obj else "?"
+        lines.append(f"[{cat}] {text} ({date})")
+    return "\n".join(lines)
