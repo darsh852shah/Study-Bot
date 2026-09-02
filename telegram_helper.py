@@ -7,11 +7,16 @@ API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 
 def send_message(text):
-    r = requests.post(f"{API_URL}/sendMessage", json={
-        "chat_id": CHAT_ID,
-        "text": text,
-        "parse_mode": "Markdown",
-    })
+    """Send a message with Markdown formatting. If Telegram rejects it (e.g. unmatched
+    markdown symbols in LLM output), automatically retry as plain text so the message
+    always gets through instead of raising and triggering the error handler."""
+    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}
+    r = requests.post(f"{API_URL}/sendMessage", json=payload)
+    if r.status_code == 400:
+        # Telegram's legacy Markdown mode is strict — unmatched *, _, ` etc. cause 400.
+        # Strip parse_mode and resend as plain text.
+        payload.pop("parse_mode")
+        r = requests.post(f"{API_URL}/sendMessage", json=payload)
     r.raise_for_status()
     return r.json()
 
