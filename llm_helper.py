@@ -37,7 +37,7 @@ def format_lecture_stats(stats, max_chapters=6):
         remaining = s["not_started_chapters"][:max_chapters]
         if remaining:
             more = f" (+{len(s['not_started_chapters']) - max_chapters} more)" if len(s["not_started_chapters"]) > max_chapters else ""
-            lines.append(f"  Not started yet: {', '.join(remaining)}{more}")
+            lines.append(f"  Not started, in syllabus order (next up first): {', '.join(remaining)}{more}")
     return "\n".join(lines)
 
 
@@ -203,6 +203,14 @@ def extract_log_fields(message_text=None, previous_draft=None, correction_text=N
         user_prompt = (
             f"Previous understanding (JSON): {json.dumps(previous_draft)}\n\n"
             f'The user\'s follow-up/correction message: "{correction_text}"\n\n'
+            "Output the updated JSON object only."
+        )
+    else:
+        user_prompt = f'User\'s message: "{message_text}"\n\nExtract the JSON object.'
+
+    raw = generate_text(EXTRACT_SYSTEM_PROMPT, user_prompt, max_tokens=2048)
+    return _parse_json_object(raw)
+ follow-up/correction message: "{correction_text}"\n\n'
             "Output the updated JSON object only."
         )
     else:
