@@ -78,7 +78,6 @@ def build_context(history_days=14):
         f"LONG-TERM MEMORIES (things learned about this student from past conversations):\n{memory_text}"
     )
 
-
 def answer_query(user_message, chat_history=None):
     """chat_history is an optional list of (role, text) tuples — role is 'user' or 'assistant' —
     giving the LLM a little short-term memory so back-to-back questions feel like a conversation
@@ -100,15 +99,10 @@ def answer_query(user_message, chat_history=None):
     )
     reply = generate_text(QUERY_SYSTEM_PROMPT, user_prompt, max_tokens=4096)
 
-    # Extract and save any new long-term memories from this exchange. Best-effort — a failure
-    # here should never affect the user's reply. (Previously this only ran every 3rd query via
-    # an in-memory counter, but that counter resets on every process restart — and Render's
-    # free tier spins the service down when idle — so it rarely survived long enough to reach
-    # 3 in practice. Running it every time costs one extra fast Groq call, which is cheap.)
     try:
-    _extract_and_save_memories(user_message, reply, get_memories())
+        _extract_and_save_memories(user_message, reply, get_memories())
     except Exception as e:
-    print(f"Memory extraction failed: {e}")
+        print(f"Memory extraction failed: {e}")
 
     return reply
 
