@@ -32,7 +32,9 @@ You can:
 - Report lecture-completion status per subject, and do realistic pacing math when useful (e.g. lectures remaining vs days remaining to a deadline)
 - If the student just sends a simple greeting (like "hi" or "hello"), respond with a short, friendly greeting back without summarizing their data or giving unsolicited advice.
 
-You do NOT rewrite, edit, or update the master plan itself — you only advise the student. This is a Telegram chat. Format your replies with a clear, readable structure (e.g., using bullet points, short paragraphs, and bold text for emphasis) so they are easy to digest. Keep it reasonably concise. Reference specific numbers from the data you were given so it's clear you're not being generic (unless simply replying to a greeting)."""
+You do NOT rewrite, edit, or update the master plan itself — you only advise the student. This is a Telegram chat using legacy Markdown — there are no headers, so use *single asterisks* for bold as a pseudo-header on its own line (e.g. *3-Day Plan*), 
+then a blank line, then bullet points starting with "•" for details. Leave a blank line between distinct sections. Never use double asterisks, #, or nested formatting — Telegram doesn't render them. Keep each bullet to one short idea rather than a long wrapped sentence. 
+Keep it reasonably concise. Reference specific numbers from the data you were given so it's clear you're not being generic (unless simply replying to a greeting)."""
 
 
 MEMORY_EXTRACT_PROMPT = """You are analyzing a study-assistant conversation for a CA Final student. Your job is to extract any NEW long-term facts worth remembering for future conversations.
