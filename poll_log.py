@@ -95,19 +95,19 @@ def format_confirmation(draft):
     lines.append(f"• Broke focus: {preview['broke'] or '—'}")
     lines.append(f"• Fix for tomorrow: {preview['fix'] or '—'}")
 
-  lecture_results = draft.get("lecture_results") or {}
-for subject, result in lecture_results.items():
-    if not result:
-        continue
-    status = result.get("status")
-    if status == "matched":
-        lines.append(f"• {subject} lecture: {result['chapter']} ({result['lecture']}) → will mark Watched")
-    elif status == "skipped":
-        lines.append(f"• {subject} lecture: none specified (revision) → tracker untouched")
-    elif status == "no_match":
-        lines.append(f"• {subject} lecture: no match found → tracker untouched")
-    elif status == "error":
-        lines.append(f"• {subject} lecture: couldn't check tracker → tracker untouched")
+    lecture_results = draft.get("lecture_results") or {}
+    for subject, result in lecture_results.items():
+        if not result:
+            continue
+        status = result.get("status")
+        if status == "matched":
+            lines.append(f"• {subject} lecture: {result['chapter']} ({result['lecture']}) → will mark Watched")
+        elif status == "skipped":
+            lines.append(f"• {subject} lecture: none specified (revision) → tracker untouched")
+        elif status == "no_match":
+            lines.append(f"• {subject} lecture: no match found → tracker untouched")
+        elif status == "error":
+            lines.append(f"• {subject} lecture: couldn't check tracker → tracker untouched")
 
     missing = missing_fields(draft)
     if missing:
@@ -115,7 +115,6 @@ for subject, result in lecture_results.items():
     else:
         lines.append("\nReply *yes* to save, or just tell me what to fix.")
     return "\n".join(lines)
-
 
 
 # ---- lecture-marking flow (Option A): ask which lecture was watched, skip-safe ----
