@@ -106,9 +106,9 @@ def answer_query(user_message, chat_history=None):
     # free tier spins the service down when idle — so it rarely survived long enough to reach
     # 3 in practice. Running it every time costs one extra fast Groq call, which is cheap.)
     try:
-        _extract_and_save_memories(user_message, reply, get_memories())
-    except Exception:
-        pass
+    _extract_and_save_memories(user_message, reply, get_memories())
+except Exception as e:
+    print(f"Memory extraction failed: {e}")
 
     return reply
 
