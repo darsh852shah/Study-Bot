@@ -105,7 +105,7 @@ def answer_query(user_message, chat_history=None):
     # an in-memory counter, but that counter resets on every process restart — and Render's
     # free tier spins the service down when idle — so it rarely survived long enough to reach
     # 3 in practice. Running it every time costs one extra fast Groq call, which is cheap.)
-    try:
+try:
     _extract_and_save_memories(user_message, reply, get_memories())
 except Exception as e:
     print(f"Memory extraction failed: {e}")
