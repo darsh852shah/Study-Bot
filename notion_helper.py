@@ -1,6 +1,7 @@
 import os
 import re
 import requests
+import time
 from datetime import datetime, timezone, timedelta
 
 NOTION_API_KEY = os.environ["NOTION_API_KEY"]
@@ -280,7 +281,27 @@ def get_lecture_stats():
         s["not_started_chapters"].sort(key=_chapter_sort_key)
 
     return stats
+_tracked_subjects_cache = {"value": None, "ts": 0}
+_TRACKED_SUBJECTS_TTL = 300  # seconds — avoids a full Lecture Tracker fetch on every message in a log flow
 
+
+def get_tracked_subjects():
+    """Returns the set of Subject values that actually have rows in the Lecture Tracker DB —
+    i.e. which subjects should trigger the 'which lecture did you watch' ask + auto-mark-Watched
+    flow. Read live from Notion rather than hardcoded, so adding a new subject's lectures to the
+    tracker (e.g. DT, once you start it) is picked up automatically, with no code change.
+    Cached briefly since this reuses get_lecture_stats()'s full-DB fetch and gets called
+    repeatedly during a single log conversation."""
+    if not NOTION_LECTURE_DB_ID:
+        return set()
+    now = time.time()
+    if _tracked_subjects_cache["value"] is not None and now - _tracked_subjects_cache["ts"] < _TRACKED_SUBJECTS_TTL:
+        return _tracked_subjects_cache["value"]
+    stats = get_lecture_stats()
+    subjects = set(stats.keys()) if stats else set()
+    _tracked_subjects_cache["value"] = subjects
+    _tracked_subjects_cache["ts"] = now
+    return subjects
 
 def _normalize_lecture_text(text):
     return re.sub(r"[^a-z0-9]", "", (text or "").lower())
