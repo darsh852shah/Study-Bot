@@ -4,7 +4,7 @@ import re
 from telegram_helper import get_updates, send_message, download_voice
 from notion_helper import (
     create_log_entry, preview_entry, parse_activity_breakdown,
-    find_lecture_matches, mark_lecture_watched,
+    find_lecture_matches, mark_lecture_watched, get_tracked_subjects,
 )
 from llm_helper import extract_log_fields
 from stt_helper import transcribe_audio
@@ -16,10 +16,11 @@ CONFIRM_WORDS = {"yes", "y", "yep", "yeah", "yup", "confirm", "save", "ok", "oka
 CANCEL_WORDS = {"no", "cancel", "discard", "nvm", "never mind", "scrap", "stop"}
 NEW_LOG_TRIGGERS = ["new log", "new entry", "start over", "start fresh", "reset"]
 
-# Subjects whose Lecture Tracker rows we ask about before saving a log — FR/AFM only, per the
-# user's explicit "Option A" design: skipping this question must NEVER touch the tracker,
-# since logged FR/AFM hours might just be revision rather than a newly-watched lecture.
-LECTURE_TRACKED_SUBJECTS = ("FR", "AFM")
+# Which subjects trigger the "which lecture did you watch" ask + auto-mark-Watched flow is
+# now driven by get_tracked_subjects() — whatever Subject values actually have rows in the
+# Notion Lecture Tracker DB — rather than a hardcoded tuple. The "Option A" rule still holds
+# regardless of which subjects are tracked: skipping this question must NEVER touch the
+# tracker, since logged hours might just be revision rather than a newly-watched lecture.
 LECTURE_SKIP_WORDS = {"skip", "no", "none", "n/a", "na", "nothing", "revision", "revised", "revise"}
 
 STRICT_LOG_HELP = (
@@ -116,21 +117,42 @@ def format_confirmation(draft):
         lines.append("\nReply *yes* to save, or just tell me what to fix.")
     return "\n".join(lines)
 
+lecture_results = draft.get("lecture_results") or {}
+for subject, result in lecture_results.items():
+    if not result:
+        continue
+    status = result.get("status")
+    if status == "matched":
+        lines.append(f"• {subject} lecture: {result['chapter']} ({result['lecture']}) → will mark Watched")
+    elif status == "skipped":
+        lines.append(f"• {subject} lecture: none specified (revision) → tracker untouched")
+    elif status == "no_match":
+        lines.append(f"• {subject} lecture: no match found → tracker untouched")
+    elif status == "error":
+        lines.append(f"• {subject} lecture: couldn't check tracker → tracker untouched")
 
-# ---- lecture-marking flow (Option A): ask which FR/AFM lecture was watched, skip-safe ----
+# ---- lecture-marking flow (Option A): ask which lecture was watched, skip-safe ----
 
 def subjects_needing_lecture_check(breakdown):
-    """Which of FR/AFM appear (with hours) in the parsed breakdown, in a stable order."""
+    """Which logged activities correspond to subjects that actually have rows in the Lecture
+    Tracker DB, in the order they appear in the breakdown."""
     if not breakdown:
         return []
     _, activity_names, _ = parse_activity_breakdown(breakdown)
-    return [s for s in LECTURE_TRACKED_SUBJECTS if s in activity_names]
+    tracked = get_tracked_subjects()
+    return [s for s in activity_names if s in tracked]
 
+
+_LECTURE_NAME_EXAMPLES = {
+    "FR": '"D18-P1"',
+    "AFM": '"Class 5"',
+}
 
 def lecture_question_text(subject):
-    example = "\"D18-P1\"" if subject == "FR" else "\"Class 5\""
+    example = _LECTURE_NAME_EXAMPLES.get(subject)
+    example_clause = f" (e.g. {example})" if example else ""
     return (
-        f"Which {subject} lecture did you watch today? Reply with its name (e.g. {example}), "
+        f"Which {subject} lecture did you watch today? Reply with its name{example_clause}, "
         "or say *skip* if this was revision rather than a new lecture."
     )
 
