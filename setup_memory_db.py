@@ -62,7 +62,7 @@ def create_memory_database():
         },
     }
 
-    r = requests.post("https://api.notion.com/v1/databases", headers=HEADERS, json=payload)
+    r = requests.post("https://api.notion.com/v1/databases", headers=HEADERS, json=payload, timeout=(5, 30))
     r.raise_for_status()
     db = r.json()
     db_id = db["id"]
