@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import time
 import requests
 
@@ -15,6 +16,14 @@ LOG_EXTRACTION_MODEL = os.environ.get("GROQ_LOG_EXTRACTION_MODEL", MEMORY_MODEL)
 ANSWER_MAX_TOKENS = int(os.environ.get("GROQ_ANSWER_MAX_TOKENS", "450"))
 LOG_EXTRACTION_MAX_TOKENS = int(os.environ.get("GROQ_LOG_EXTRACTION_MAX_TOKENS", "384"))
 MEMORY_MAX_TOKENS = int(os.environ.get("GROQ_MEMORY_MAX_TOKENS", "220"))
+
+
+def trim_prompt_text(text, max_chars):
+    """Bound context sent to an LLM while keeping the beginning of each source intact."""
+    text = (text or "").strip()
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rsplit("\n", 1)[0].rstrip() + "\n[context truncated]"
 
 
 def load_plan_summary():
@@ -65,6 +74,24 @@ _GREETING_SHORTCUTS = {
 }
 
 
+def _looks_like_log(text):
+    """Recognize common study recaps without spending an LLM call."""
+    lowered = text.lower()
+    has_hours = bool(re.search(r"\b\d+(?:\.\d+)?\s*(?:hours?|hrs?|h)\b", lowered))
+    has_activity = any(
+        re.search(rf"\b{re.escape(activity.lower())}\b", lowered)
+        for activity in ("SPOM", "ITT", "GMCS", "FR", "AFM", "DT", "IDT", "Audit", "IBS", "Revision", "Mock")
+    )
+    has_recap_marker = bool(
+        re.search(r"\b(studied|did|finished|completed|watched|revised|covered|spent)\b", lowered)
+    )
+    has_log_field = bool(
+        re.search(r"\b(?:mood|energy)\s*(?:was|is|:)?\s*[1-5]\b", lowered)
+        or re.search(r"\b(?:distracted|focus|win|tomorrow)\b", lowered)
+    )
+    return has_hours and (has_activity or has_recap_marker or has_log_field)
+
+
 def classify_intent(text):
     """Decides whether a free-text message is a study-log entry or a conversational
     question/plan request.
@@ -79,6 +106,8 @@ def classify_intent(text):
     stripped = text.strip().lower().strip(" !.?")
     if stripped in _GREETING_SHORTCUTS or text.strip().endswith("?"):
         return "query"
+    if _looks_like_log(text):
+        return "log"
 
     try:
         raw = generate_text(
@@ -86,7 +115,7 @@ def classify_intent(text):
             max_tokens=12, reasoning_effort="none",
         )
     except Exception:
-        return "query"
+        return "log" if _looks_like_log(text) else "query"
 
     upper = raw.strip().upper()
     if "LOG" in upper and "QUERY" not in upper:

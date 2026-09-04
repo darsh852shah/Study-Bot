@@ -1,7 +1,7 @@
 import logging
 
 from notion_helper import get_today_entry, get_recent_entries
-from llm_helper import load_plan_summary, format_logs, generate_text
+from llm_helper import CLASSIFIER_MODEL, load_plan_summary, format_logs, generate_text, trim_prompt_text
 from telegram_helper import send_message
 
 logger = logging.getLogger(__name__)
@@ -56,8 +56,15 @@ def main():
     try:
         plan = load_plan_summary()
         logs = format_logs(get_recent_entries(days=5))
-        user_prompt = f"MASTER PLAN SUMMARY:\n{plan}\n\nRECENT LOGS (most recent first, includes today):\n{logs}\n\nWrite tonight's coaching reflection."
-        coach_msg = generate_text(SYSTEM_PROMPT, user_prompt, max_tokens=160, reasoning_effort="none")
+        user_prompt = (
+            f"MASTER PLAN SUMMARY:\n{trim_prompt_text(plan, 8000)}\n\n"
+            f"RECENT LOGS (most recent first, includes today):\n{trim_prompt_text(logs, 4000)}\n\n"
+            "Write tonight's coaching reflection."
+        )
+        coach_msg = generate_text(
+            SYSTEM_PROMPT, user_prompt, model=CLASSIFIER_MODEL,
+            max_tokens=160, reasoning_effort="none",
+        )
         send_message(coach_msg)
     except Exception:
         logger.exception("Evening coaching reflection failed after stats were sent")

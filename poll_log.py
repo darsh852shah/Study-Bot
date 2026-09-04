@@ -1,5 +1,6 @@
 import json
 import re
+import logging
 
 from telegram_helper import get_updates, send_message, download_voice
 from notion_helper import (
@@ -8,6 +9,8 @@ from notion_helper import (
 )
 from llm_helper import extract_log_fields
 from stt_helper import transcribe_audio
+
+logger = logging.getLogger(__name__)
 
 OFFSET_FILE = "last_update_id.txt"
 PENDING_FILE = "pending_log.json"
@@ -282,6 +285,7 @@ def save_draft(draft):
         draft.get("fix") or "",
     )
     total = result["properties"]["Time effective (hrs)"]["number"]
+    logger.info("Saved daily log to Notion: %sh", total)
     send_message(f"✅ Saved — {total}h logged for today.")
 
 
@@ -296,6 +300,7 @@ def handle_strict_log(body):
         total = result["properties"]["Time effective (hrs)"]["number"]
         send_message(f"✅ Logged: {breakdown} (total {total}h), mood {mood}/5, energy {energy}/5")
     except Exception as e:
+        logger.exception("Failed to save strict log to Notion")
         send_message(f"⚠️ Couldn't save that log: {e}")
 
 

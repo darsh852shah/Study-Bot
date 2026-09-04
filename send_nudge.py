@@ -1,7 +1,7 @@
 from datetime import datetime, timezone, timedelta
 
 from notion_helper import get_recent_entries
-from llm_helper import load_plan_summary, format_logs, generate_text
+from llm_helper import CLASSIFIER_MODEL, load_plan_summary, format_logs, generate_text, trim_prompt_text
 from telegram_helper import send_message
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -28,10 +28,17 @@ def greeting():
 def main():
     plan = load_plan_summary()
     logs = format_logs(get_recent_entries(days=5))
-    user_prompt = f"MASTER PLAN SUMMARY:\n{plan}\n\nRECENT LOGS (most recent first):\n{logs}\n\nWrite today's morning nudge."
+    user_prompt = (
+        f"MASTER PLAN SUMMARY:\n{trim_prompt_text(plan, 8000)}\n\n"
+        f"RECENT LOGS (most recent first):\n{trim_prompt_text(logs, 4000)}\n\n"
+        "Write today's morning nudge."
+    )
 
     try:
-        body = generate_text(SYSTEM_PROMPT, user_prompt, max_tokens=180, reasoning_effort="none")
+        body = generate_text(
+            SYSTEM_PROMPT, user_prompt, model=CLASSIFIER_MODEL,
+            max_tokens=180, reasoning_effort="none",
+        )
     except Exception as e:
         print(f"generate_text failed, using fallback nudge: {type(e).__name__}: {e}")
         body = (

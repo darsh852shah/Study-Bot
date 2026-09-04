@@ -1,5 +1,5 @@
 from notion_helper import get_today_entry, get_recent_entries
-from llm_helper import load_plan_summary, format_logs, generate_text
+from llm_helper import CLASSIFIER_MODEL, load_plan_summary, format_logs, generate_text, trim_prompt_text
 from telegram_helper import send_message
 
 SYSTEM_PROMPT = """You are a grounded study coach for a CA Final student. It's midday and they haven't logged any study yet today.
@@ -19,10 +19,17 @@ def main():
 
     plan = load_plan_summary()
     logs = format_logs(get_recent_entries(days=5))
-    prompt = f"MASTER PLAN SUMMARY:\n{plan}\n\nRECENT LOGS (most recent first):\n{logs}\n\nWrite the midday check-in."
+    prompt = (
+        f"MASTER PLAN SUMMARY:\n{trim_prompt_text(plan, 8000)}\n\n"
+        f"RECENT LOGS (most recent first):\n{trim_prompt_text(logs, 4000)}\n\n"
+        "Write the midday check-in."
+    )
 
     try:
-        msg = generate_text(SYSTEM_PROMPT, prompt, max_tokens=200, reasoning_effort="none")
+        msg = generate_text(
+            SYSTEM_PROMPT, prompt, model=CLASSIFIER_MODEL,
+            max_tokens=160, reasoning_effort="none",
+        )
     except Exception as e:
         # Previously failed with zero output — impossible to diagnose from the Actions log.
         # Print the real reason so the next silent skip is actually visible.
