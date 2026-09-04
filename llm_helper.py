@@ -112,7 +112,7 @@ def classify_intent(text):
     try:
         raw = generate_text(
             CLASSIFY_SYSTEM_PROMPT, f'Message: "{text}"', model=CLASSIFIER_MODEL,
-            max_tokens=12, reasoning_effort="none",
+            max_tokens=12, reasoning_effort="low",
         )
     except Exception:
         return "log" if _looks_like_log(text) else "query"
