@@ -71,7 +71,7 @@ webhook. You can delete it entirely once you've confirmed the webhook works.)
    - `NOTION_PAGE_ID`
    - `NOTION_LECTURE_DB_ID` ← new, from step 1
    - `GROQ_API_KEY`
-   - `TELEGRAM_WEBHOOK_SECRET` ← new, make up any random string (e.g. generate one with
+   - `TELEGRAM_WEBHOOK_SECRET` ← required, make up any random string (e.g. generate one with
      `python3 -c "import secrets; print(secrets.token_hex(24))"`) — this stops randoms who
      find your Render URL from sending fake messages to your bot.
 4. Deploy. Once it's live, note your service URL, e.g. `https://study-bot-xyz.onrender.com`.
@@ -123,5 +123,5 @@ If you ever want to go back to polling: delete the webhook (
 | Log a day | Up to 15 min delay (poll cycle) | Instant |
 | Ask about your plan/progress | Not possible | Ask anything, anytime — grounded in live plan + logs + lecture tracker |
 | Re-planning | Manual (ask in this chat) | Bot can suggest a re-plan on request, using real data |
-| State storage | `pending_log.json` / `last_update_id.txt`, committed to the repo by CI | In-memory on the server (resets on a redeploy/restart — fine for a single-user bot) |
+| State storage | `pending_log.json` / `last_update_id.txt`, committed to the repo by CI | `webhook_state.json` on the server (persists drafts and recently processed Telegram updates across restarts; use shared durable storage before running multiple instances) |
 | Morning nudge / midday check-in / evening report | GitHub Actions cron | Unchanged, still GitHub Actions cron |
