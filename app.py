@@ -11,12 +11,13 @@ Routing logic per incoming message:
   2. Otherwise -> classify_intent() decides "log" (fresh log attempt) vs "query"
      (a question / re-plan request), and routes accordingly.
 
-State (pending log draft + a little chat memory for conversational continuity) is kept
-in-memory per process. That's fine for a single-user bot on an always-on host; it just
-means a restart clears any in-progress draft/conversation, same as before.
+State (pending log draft, recent message IDs, and a little chat memory for conversational
+continuity) is stored in a local JSON file. This survives a restart on a single instance;
+use shared durable storage before scaling the service to multiple instances.
 """
 
 import os
+import json
 import threading
 
 from flask import Flask, request, jsonify
@@ -30,15 +31,49 @@ from query_handler import answer_query
 app = Flask(__name__)
 
 TELEGRAM_CHAT_ID = str(os.environ["TELEGRAM_CHAT_ID"])
-# Optional but strongly recommended: set this to a random string, and pass the same value
-# as secret_token when you call Telegram's setWebhook (see SETUP_GUIDE_WEBHOOK.md). Without
-# it, anyone who finds your Render URL could POST fake Telegram updates at your bot.
-WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
+# Required: Telegram sends this header when the webhook was registered with secret_token.
+# Refuse to start without it so a public endpoint cannot silently run unauthenticated.
+WEBHOOK_SECRET = os.environ["TELEGRAM_WEBHOOK_SECRET"]
 
 MAX_HISTORY = 6  # (role, text) turns kept for conversational continuity
 
-STATE = {"pending": None, "chat_history": []}
+STATE_FILE = os.environ.get("STUDY_BOT_STATE_FILE", "webhook_state.json")
+MAX_PROCESSED_UPDATES = 1000
+MAX_QUEUED_UPDATES = 20
+
+
+def load_state():
+    try:
+        with open(STATE_FILE, encoding="utf-8") as state_file:
+            saved = json.load(state_file)
+        if not isinstance(saved, dict):
+            raise ValueError("state is not an object")
+        chat_history = saved.get("chat_history", [])
+        processed_updates = saved.get("processed_updates", [])
+        if not isinstance(chat_history, list):
+            chat_history = []
+        if not isinstance(processed_updates, list):
+            processed_updates = []
+        processed_updates = [update_id for update_id in processed_updates if isinstance(update_id, int)]
+        return {
+            "pending": saved.get("pending"),
+            "chat_history": chat_history[-MAX_HISTORY:],
+            "processed_updates": processed_updates[-MAX_PROCESSED_UPDATES:],
+        }
+    except (FileNotFoundError, json.JSONDecodeError, ValueError):
+        return {"pending": None, "chat_history": [], "processed_updates": []}
+
+
+def save_state():
+    temporary_file = f"{STATE_FILE}.tmp"
+    with open(temporary_file, "w", encoding="utf-8") as state_file:
+        json.dump(STATE, state_file)
+    os.replace(temporary_file, STATE_FILE)
+
+
+STATE = load_state()
 STATE_LOCK = threading.Lock()  # Telegram can deliver updates in quick succession; keep them serialized
+UPDATE_SLOTS = threading.BoundedSemaphore(MAX_QUEUED_UPDATES)
 
 
 def add_to_history(role, text):
@@ -48,20 +83,47 @@ def add_to_history(role, text):
 
 @app.route("/telegram-webhook", methods=["POST"])
 def telegram_webhook():
-    if WEBHOOK_SECRET and request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
+    if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
         return jsonify({"ok": False, "error": "bad secret token"}), 403
 
-    update = request.get_json(silent=True) or {}
-    message = update.get("message", {})
-    chat_id = str(message.get("chat", {}).get("id", ""))
+    update = request.get_json(silent=True)
+    if not isinstance(update, dict):
+        return jsonify({"ok": True})
+    message = update.get("message")
+    if not isinstance(message, dict):
+        return jsonify({"ok": True})
+    chat = message.get("chat")
+    if not isinstance(chat, dict):
+        return jsonify({"ok": True})
+    chat_id = str(chat.get("id", ""))
+    update_id = update.get("update_id")
 
     # This endpoint is a public URL — only ever act on messages from the owner's chat.
-    if chat_id and chat_id != TELEGRAM_CHAT_ID:
+    if not isinstance(update_id, int) or not chat_id or chat_id != TELEGRAM_CHAT_ID:
         return jsonify({"ok": True})
+
+    if not UPDATE_SLOTS.acquire(blocking=False):
+        return jsonify({"ok": False, "error": "busy"}), 503
+
+    with STATE_LOCK:
+        if update_id in STATE["processed_updates"]:
+            UPDATE_SLOTS.release()
+            return jsonify({"ok": True})
+        # Record delivery before side effects. A duplicate must never create a second log.
+        STATE["processed_updates"].append(update_id)
+        del STATE["processed_updates"][:-MAX_PROCESSED_UPDATES]
+        save_state()
 
     # Reply to Telegram immediately; do the actual work (which calls Groq/Notion) in the
     # background so Telegram doesn't retry the webhook on a slow LLM/Notion response.
-    threading.Thread(target=handle_update_safely, args=(update,), daemon=True).start()
+    try:
+        threading.Thread(target=handle_update_safely, args=(update,), daemon=True).start()
+    except Exception:
+        UPDATE_SLOTS.release()
+        with STATE_LOCK:
+            STATE["processed_updates"].remove(update_id)
+            save_state()
+        raise
     return jsonify({"ok": True})
 
 
@@ -69,11 +131,15 @@ def handle_update_safely(update):
     try:
         with STATE_LOCK:
             route_update(update)
+            save_state()
     except Exception as e:
         try:
-            send_message(f"⚠️ Something broke handling that: {e}")
+            print(f"Error handling Telegram update: {e}")
+            send_message("⚠️ I couldn't process that just now. Please try again in a minute.")
         except Exception:
             pass  # if even sending the error fails, there's nothing more to do
+    finally:
+        UPDATE_SLOTS.release()
 
 
 def route_update(update):
@@ -139,7 +205,8 @@ def route_update(update):
     try:
         reply = answer_query(incoming_text, chat_history=STATE["chat_history"])
     except Exception as e:
-        reply = f"⚠️ Couldn't work that out just now ({e}). Try asking again in a moment."
+        print(f"Error answering Telegram query: {e}")
+        reply = "⚠️ I couldn't reach your study data just now. Try asking again in a moment."
     if STATE["pending"] is not None:
         reply += (
             "\n\n_(By the way, you've still got an unsaved log draft from earlier — "

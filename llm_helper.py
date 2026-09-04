@@ -5,7 +5,13 @@ import requests
 
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-MODEL = "qwen/qwen3.6-27b"
+# Keep these configurable so a deployment can use the exact model IDs shown in its Groq
+# console without editing code. The smaller model handles short classification; the newer
+# Qwen model is reserved for the user-facing answer.
+CLASSIFIER_MODEL = os.environ.get("GROQ_CLASSIFIER_MODEL", "openai/gpt-oss-20b")
+ANSWER_MODEL = os.environ.get("GROQ_ANSWER_MODEL", "qwen/qwen3.8-27b")
+MEMORY_MODEL = os.environ.get("GROQ_MEMORY_MODEL", "qwen/qwen3.6-27b")
+LOG_EXTRACTION_MODEL = os.environ.get("GROQ_LOG_EXTRACTION_MODEL", MEMORY_MODEL)
 
 
 def load_plan_summary():
@@ -55,6 +61,46 @@ _GREETING_SHORTCUTS = {
     "good morning", "good evening", "good afternoon", "gm", "morning",
 }
 
+_LOG_ACTIVITY_NAMES = (
+    "SPOM", "ITT", "GMCS", "FR", "AFM", "DT", "IDT", "Audit", "IBS",
+    "Revision", "Mock", "Other",
+)
+
+
+def _looks_like_study_log(text):
+    """Return ``True`` for clear, self-contained study recaps without an LLM call.
+
+    Free-text logging must not depend on the classifier model being available.  In
+    particular, a failed/incorrect classifier model configuration used to turn an
+    otherwise obvious message such as ``AFM: 2 hours, mood 4`` into a general query,
+    so ``poll_log`` was never reached.  Keep this deliberately conservative: questions
+    still go to the conversational handler, while explicit subject/hour recaps and
+    structured log details always reach the log parser.
+    """
+    import re
+
+    stripped = (text or "").strip()
+    if not stripped or "?" in stripped:
+        return False
+
+    subject_pattern = "|".join(re.escape(subject) for subject in _LOG_ACTIVITY_NAMES)
+    has_subject_hours = re.search(
+        rf"\b(?:{subject_pattern})\b\s*(?::|[-–—])?\s*\d+(?:\.\d+)?\s*(?:h|hr|hrs|hour|hours)?\b",
+        stripped,
+        flags=re.IGNORECASE,
+    )
+    has_log_details = re.search(
+        r"\b(?:mood|energy)\s*(?:is|was|:)?\s*[1-5]\b",
+        stripped,
+        flags=re.IGNORECASE,
+    )
+    has_recap_language = re.search(
+        r"\b(?:studied|revised|watched|completed|did)\b.*\b\d+(?:\.\d+)?\s*(?:h|hr|hrs|hour|hours)\b",
+        stripped,
+        flags=re.IGNORECASE,
+    )
+    return bool(has_subject_hours or has_recap_language)
+
 
 def classify_intent(text):
     """Decides whether a free-text message is a study-log entry or a conversational
@@ -70,9 +116,14 @@ def classify_intent(text):
     stripped = text.strip().lower().strip(" !.?")
     if stripped in _GREETING_SHORTCUTS or text.strip().endswith("?"):
         return "query"
+    if _looks_like_study_log(text):
+        return "log"
 
     try:
-        raw = generate_text(CLASSIFY_SYSTEM_PROMPT, f'Message: "{text}"', max_tokens=40, reasoning_effort="none")
+        raw = generate_text(
+            CLASSIFY_SYSTEM_PROMPT, f'Message: "{text}"', model=CLASSIFIER_MODEL,
+            max_tokens=12, reasoning_effort="none",
+        )
     except Exception:
         return "query"
 
@@ -105,8 +156,12 @@ def format_logs(entries):
     return "\n".join(lines)
 
 
-def generate_text(system_prompt, user_prompt, max_tokens=220, reasoning_effort="default"):
-    """reasoning_effort for qwen/qwen3.6-27b on Groq supports only "none" or "default".
+def generate_text(system_prompt, user_prompt, model=ANSWER_MODEL, max_tokens=220, reasoning_effort="default"):
+    """Generate text with the requested Groq model.
+
+    ``reasoning_effort`` support varies by Groq model; the configured models use only
+    "none" or "default". Set the ``GROQ_*_MODEL`` environment variables to exact model
+    IDs from the Groq console when they differ from the defaults.
     "none" disables reasoning (faster, lower quality — good for classify_intent).
     "default" enables reasoning (recommended for log extraction, query answering, re-planning).
     Passing any other value ("low", "medium", "high") causes a 400 Bad Request from the Groq API.
@@ -118,7 +173,7 @@ def generate_text(system_prompt, user_prompt, max_tokens=220, reasoning_effort="
         "Content-Type": "application/json",
     }
     payload = {
-        "model": MODEL,
+        "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -208,5 +263,5 @@ def extract_log_fields(message_text=None, previous_draft=None, correction_text=N
     else:
         user_prompt = f'User\'s message: "{message_text}"\n\nExtract the JSON object.'
 
-    raw = generate_text(EXTRACT_SYSTEM_PROMPT, user_prompt, max_tokens=2048)
+    raw = generate_text(EXTRACT_SYSTEM_PROMPT, user_prompt, model=LOG_EXTRACTION_MODEL, max_tokens=1024)
     return _parse_json_object(raw)
