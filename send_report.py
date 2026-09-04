@@ -1,6 +1,10 @@
+import logging
+
 from notion_helper import get_today_entry, get_recent_entries
 from llm_helper import load_plan_summary, format_logs, generate_text
 from telegram_helper import send_message
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a direct, grounded study coach for a CA Final student preparing for the May 2027 exam.
 You're given their master study plan and their last few days of logged study data, including today's.
@@ -53,10 +57,10 @@ def main():
         plan = load_plan_summary()
         logs = format_logs(get_recent_entries(days=5))
         user_prompt = f"MASTER PLAN SUMMARY:\n{plan}\n\nRECENT LOGS (most recent first, includes today):\n{logs}\n\nWrite tonight's coaching reflection."
-        coach_msg = generate_text(SYSTEM_PROMPT, user_prompt, max_tokens=220, reasoning_effort="none")
+        coach_msg = generate_text(SYSTEM_PROMPT, user_prompt, max_tokens=160, reasoning_effort="none")
         send_message(coach_msg)
     except Exception:
-        pass  # stats already sent; coaching line is a bonus, not critical
+        logger.exception("Evening coaching reflection failed after stats were sent")
 
 
 if __name__ == "__main__":

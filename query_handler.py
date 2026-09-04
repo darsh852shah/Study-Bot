@@ -10,7 +10,10 @@ from notion_helper import (
     get_recent_entries, get_lecture_stats, get_memories,
     format_memories, save_memory, today_ist,
 )
-from llm_helper import ANSWER_MODEL, MEMORY_MODEL, load_plan_summary, format_logs, format_lecture_stats, generate_text
+from llm_helper import (
+    ANSWER_MODEL, MEMORY_MODEL, ANSWER_MAX_TOKENS, MEMORY_MAX_TOKENS,
+    load_plan_summary, format_logs, format_lecture_stats, generate_text,
+)
 
 QUERY_SYSTEM_PROMPT = """You are a direct, grounded study assistant for a CA Final student, scoped ONLY to their study plan, progress, and how to improve it. You're given the current date and time, their live master plan, their recent daily logs, and their lecture tracker completion stats below — this is the ONLY data you know about their prep. Never invent numbers, deadlines, lecture counts, or plan phases that aren't in what's given to you; if something isn't in the data, say so plainly instead of guessing. Use the current time (not just the date) when it's relevant — e.g. how much of today is realistically left, whether it's early or late to still expect more study today, or how close it is to a scheduled block in the Daily Template.
 
@@ -37,7 +40,9 @@ You can:
 
 You do NOT rewrite, edit, or update the master plan itself — you only advise the student. This is a Telegram chat using legacy Markdown — there are no headers, so use *single asterisks* for bold as a pseudo-header on its own line (e.g. *3-Day Plan*), 
 then a blank line, then bullet points starting with "•" for details. Leave a blank line between distinct sections. Never use double asterisks, #, or nested formatting — Telegram doesn't render them. Keep each bullet to one short idea rather than a long wrapped sentence. 
-Keep it reasonably concise. Reference specific numbers from the data you were given so it's clear you're not being generic (unless simply replying to a greeting)."""
+Keep it reasonably concise: for a normal answer use at most 4 bullets and 2 short sections.
+Reference specific numbers from the data you were given so it's clear you're not being generic
+(unless simply replying to a greeting). Never repeat the full context or restate the question."""
 
 
 MEMORY_EXTRACT_PROMPT = """You are analyzing a study-assistant conversation for a CA Final student. Your job is to extract any NEW long-term facts worth remembering for future conversations.
@@ -100,7 +105,11 @@ def answer_query(user_message, chat_history=None):
         f'Student\'s message just now: "{user_message}"\n\n'
         "Respond as their study assistant."
     )
-    reply = generate_text(QUERY_SYSTEM_PROMPT, user_prompt, model=ANSWER_MODEL, max_tokens=900)
+    reply = generate_text(
+        QUERY_SYSTEM_PROMPT, user_prompt, model=ANSWER_MODEL,
+        max_tokens=ANSWER_MAX_TOKENS, reasoning_effort="none",
+    )
+    reply = format_reply(reply)
 
     if _is_memory_worthy(user_message):
         try:
@@ -109,6 +118,27 @@ def answer_query(user_message, chat_history=None):
             print(f"Memory extraction failed: {e}")
 
     return reply
+
+
+def format_reply(reply, max_chars=3000):
+    """Keep model output readable in Telegram's legacy Markdown mode."""
+    text = (reply or "").strip().replace("```markdown", "").replace("```", "")
+    text = text.replace("**", "*")
+    lines = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            heading = stripped.lstrip("#").strip()
+            lines.append(f"*{heading}*" if heading else "")
+        else:
+            lines.append(line.rstrip())
+    text = "\n".join(lines).strip()
+    if len(text) <= max_chars:
+        return text
+    clipped = text[:max_chars].rsplit("\n", 1)[0].strip()
+    if len(clipped) < max_chars // 2:
+        clipped = text[:max_chars].rsplit(". ", 1)[0].strip()
+    return clipped.rstrip(" .") + "…"
 
 
 def _is_memory_worthy(user_message):
@@ -151,7 +181,7 @@ def _extract_and_save_memories(user_message, bot_reply, existing_memories):
 
     raw = generate_text(
         MEMORY_EXTRACT_PROMPT, user_prompt, model=MEMORY_MODEL,
-        max_tokens=300, reasoning_effort="none",
+        max_tokens=MEMORY_MAX_TOKENS, reasoning_effort="none",
     )
 
     # Parse the JSON array

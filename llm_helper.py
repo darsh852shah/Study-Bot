@@ -10,8 +10,11 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 # Qwen model is reserved for the user-facing answer.
 CLASSIFIER_MODEL = os.environ.get("GROQ_CLASSIFIER_MODEL", "openai/gpt-oss-20b")
 ANSWER_MODEL = os.environ.get("GROQ_ANSWER_MODEL", "qwen/qwen3.8-27b")
-MEMORY_MODEL = os.environ.get("GROQ_MEMORY_MODEL", "qwen/qwen3.6-27b")
+MEMORY_MODEL = os.environ.get("GROQ_MEMORY_MODEL", CLASSIFIER_MODEL)
 LOG_EXTRACTION_MODEL = os.environ.get("GROQ_LOG_EXTRACTION_MODEL", MEMORY_MODEL)
+ANSWER_MAX_TOKENS = int(os.environ.get("GROQ_ANSWER_MAX_TOKENS", "450"))
+LOG_EXTRACTION_MAX_TOKENS = int(os.environ.get("GROQ_LOG_EXTRACTION_MAX_TOKENS", "384"))
+MEMORY_MAX_TOKENS = int(os.environ.get("GROQ_MEMORY_MAX_TOKENS", "220"))
 
 
 def load_plan_summary():
@@ -114,14 +117,15 @@ def format_logs(entries):
     return "\n".join(lines)
 
 
-def generate_text(system_prompt, user_prompt, model=ANSWER_MODEL, max_tokens=220, reasoning_effort="default"):
+def generate_text(system_prompt, user_prompt, model=ANSWER_MODEL, max_tokens=220, reasoning_effort="none"):
     """Generate text with the requested Groq model.
 
     ``reasoning_effort`` support varies by Groq model; the configured models use only
     "none" or "default". Set the ``GROQ_*_MODEL`` environment variables to exact model
     IDs from the Groq console when they differ from the defaults.
     "none" disables reasoning (faster, lower quality — good for classify_intent).
-    "default" enables reasoning (recommended for log extraction, query answering, re-planning).
+    "default" enables reasoning. Keep it opt-in because hidden reasoning tokens count against
+    the Qwen quota and are not useful for short bot replies or JSON extraction.
     Passing any other value ("low", "medium", "high") causes a 400 Bad Request from the Groq API.
 
     Retries automatically on 429 (rate limit) with exponential backoff — Groq's free tier
@@ -221,5 +225,8 @@ def extract_log_fields(message_text=None, previous_draft=None, correction_text=N
     else:
         user_prompt = f'User\'s message: "{message_text}"\n\nExtract the JSON object.'
 
-    raw = generate_text(EXTRACT_SYSTEM_PROMPT, user_prompt, model=LOG_EXTRACTION_MODEL, max_tokens=1024)
+    raw = generate_text(
+        EXTRACT_SYSTEM_PROMPT, user_prompt, model=LOG_EXTRACTION_MODEL,
+        max_tokens=LOG_EXTRACTION_MAX_TOKENS, reasoning_effort="none",
+    )
     return _parse_json_object(raw)

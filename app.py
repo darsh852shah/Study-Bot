@@ -18,6 +18,7 @@ use shared durable storage before scaling the service to multiple instances.
 
 import os
 import json
+import logging
 import threading
 
 from flask import Flask, request, jsonify
@@ -29,6 +30,7 @@ import poll_log
 from query_handler import answer_query
 
 app = Flask(__name__)
+logger = logging.getLogger(__name__)
 
 TELEGRAM_CHAT_ID = str(os.environ["TELEGRAM_CHAT_ID"])
 # Required: Telegram sends this header when the webhook was registered with secret_token.
@@ -126,10 +128,11 @@ def handle_update_safely(update):
             route_update(update)
             save_state()
     except Exception as e:
+        logger.exception("Failed to process Telegram update")
         try:
-            send_message(f"⚠️ Something broke handling that: {e}")
+            send_message("⚠️ Something broke handling that. Please try again.")
         except Exception:
-            pass  # if even sending the error fails, there's nothing more to do
+            logger.exception("Failed to send Telegram error notification")
     finally:
         UPDATE_SLOTS.release()
 

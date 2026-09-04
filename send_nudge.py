@@ -31,8 +31,9 @@ def main():
     user_prompt = f"MASTER PLAN SUMMARY:\n{plan}\n\nRECENT LOGS (most recent first):\n{logs}\n\nWrite today's morning nudge."
 
     try:
-        body = generate_text(SYSTEM_PROMPT, user_prompt, max_tokens=350, reasoning_effort="none")
-    except Exception:
+        body = generate_text(SYSTEM_PROMPT, user_prompt, max_tokens=180, reasoning_effort="none")
+    except Exception as e:
+        print(f"generate_text failed, using fallback nudge: {type(e).__name__}: {e}")
         body = (
             "The plan's still live and today's block is waiting on you — "
             "start with whatever's next in the current phase before anything else gets a look-in."
