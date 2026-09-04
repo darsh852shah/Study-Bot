@@ -13,9 +13,9 @@ CLASSIFIER_MODEL = os.environ.get("GROQ_CLASSIFIER_MODEL", "openai/gpt-oss-20b")
 ANSWER_MODEL = os.environ.get("GROQ_ANSWER_MODEL", "qwen/qwen3.8-27b")
 MEMORY_MODEL = os.environ.get("GROQ_MEMORY_MODEL", "qwen/qwen3.6-27b")
 LOG_EXTRACTION_MODEL = os.environ.get("GROQ_LOG_EXTRACTION_MODEL", MEMORY_MODEL)
-ANSWER_MAX_TOKENS = int(os.environ.get("GROQ_ANSWER_MAX_TOKENS", "450"))
-LOG_EXTRACTION_MAX_TOKENS = int(os.environ.get("GROQ_LOG_EXTRACTION_MAX_TOKENS", "900"))
-MEMORY_MAX_TOKENS = int(os.environ.get("GROQ_MEMORY_MAX_TOKENS", "900"))
+ANSWER_MAX_TOKENS = int(os.environ.get("GROQ_ANSWER_MAX_TOKENS", "8000"))
+LOG_EXTRACTION_MAX_TOKENS = int(os.environ.get("GROQ_LOG_EXTRACTION_MAX_TOKENS", "8000"))
+MEMORY_MAX_TOKENS = int(os.environ.get("GROQ_MEMORY_MAX_TOKENS", "8000"))
 
 
 def trim_prompt_text(text, max_chars):
