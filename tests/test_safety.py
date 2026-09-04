@@ -73,3 +73,32 @@ class WebhookSafetyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class MemorySafetyTests(unittest.TestCase):
+    def test_only_long_term_messages_trigger_memory_extraction(self):
+        from query_handler import _is_memory_worthy
+
+        self.assertTrue(_is_memory_worthy("I prefer studying at night because it is quieter."))
+        self.assertTrue(_is_memory_worthy("My goal is to finish FR by November."))
+        self.assertFalse(_is_memory_worthy("Thanks"))
+        self.assertFalse(_is_memory_worthy("I studied AFM for two hours today."))
+
+    @patch("query_handler.save_memory")
+    @patch("query_handler.generate_text")
+    def test_memory_extraction_deduplicates_and_preserves_source(self, generate_text, save_memory):
+        from query_handler import _extract_and_save_memories
+        from llm_helper import MEMORY_MODEL
+
+        generate_text.return_value = (
+            '[{"memory":"Prefers studying at night.","category":"preference",'
+            '"source":"user-stated"},'
+            '{"memory":"Prefers studying at night.","category":"preference",'
+            '"source":"user-stated"}]'
+        )
+        _extract_and_save_memories("I prefer studying at night.", "Noted.", [])
+
+        save_memory.assert_called_once_with(
+            "Prefers studying at night.", category="preference", source="user-stated"
+        )
+        self.assertEqual(generate_text.call_args.kwargs["model"], MEMORY_MODEL)
+        self.assertEqual(generate_text.call_args.kwargs["max_tokens"], 300)

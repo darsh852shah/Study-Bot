@@ -74,6 +74,9 @@ webhook. You can delete it entirely once you've confirmed the webhook works.)
    - `TELEGRAM_WEBHOOK_SECRET` ← required, make up any random string (e.g. generate one with
      `python3 -c "import secrets; print(secrets.token_hex(24))"`) — this stops randoms who
      find your Render URL from sending fake messages to your bot.
+   - Optional model overrides: `GROQ_CLASSIFIER_MODEL`, `GROQ_ANSWER_MODEL`,
+     `GROQ_MEMORY_MODEL`, and `GROQ_LOG_EXTRACTION_MODEL`. Copy the exact API model IDs
+     from your Groq console if you need to override the built-in defaults.
 4. Deploy. Once it's live, note your service URL, e.g. `https://study-bot-xyz.onrender.com`.
 
 ## 4. Point Telegram at your webhook

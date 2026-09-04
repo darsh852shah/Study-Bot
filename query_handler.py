@@ -10,7 +10,7 @@ from notion_helper import (
     get_recent_entries, get_lecture_stats, get_memories,
     format_memories, save_memory, today_ist,
 )
-from llm_helper import load_plan_summary, format_logs, format_lecture_stats, generate_text
+from llm_helper import ANSWER_MODEL, MEMORY_MODEL, load_plan_summary, format_logs, format_lecture_stats, generate_text
 
 QUERY_SYSTEM_PROMPT = """You are a direct, grounded study assistant for a CA Final student, scoped ONLY to their study plan, progress, and how to improve it. You're given the current date and time, their live master plan, their recent daily logs, and their lecture tracker completion stats below — this is the ONLY data you know about their prep. Never invent numbers, deadlines, lecture counts, or plan phases that aren't in what's given to you; if something isn't in the data, say so plainly instead of guessing. Use the current time (not just the date) when it's relevant — e.g. how much of today is realistically left, whether it's early or late to still expect more study today, or how close it is to a scheduled block in the Daily Template.
 
@@ -55,7 +55,7 @@ Do NOT extract:
 - Trivial single-conversation details
 
 Output a JSON array of objects. Each object has:
-  {"memory": "short factual sentence", "category": "preference|pattern|struggle|goal|insight"}
+  {"memory": "short factual sentence", "category": "preference|pattern|struggle|goal|insight", "source": "user-stated|bot-inferred"}
 
 If nothing new is worth remembering, output an empty array: []
 Output ONLY valid JSON — no markdown, no commentary."""
@@ -100,14 +100,40 @@ def answer_query(user_message, chat_history=None):
         f'Student\'s message just now: "{user_message}"\n\n'
         "Respond as their study assistant."
     )
-    reply = generate_text(QUERY_SYSTEM_PROMPT, user_prompt, max_tokens=4096)
+    reply = generate_text(QUERY_SYSTEM_PROMPT, user_prompt, model=ANSWER_MODEL, max_tokens=900)
 
-    try:
-        _extract_and_save_memories(user_message, reply, get_memories())
-    except Exception as e:
-        print(f"Memory extraction failed: {e}")
+    if _is_memory_worthy(user_message):
+        try:
+            _extract_and_save_memories(user_message, reply, get_memories())
+        except Exception as e:
+            print(f"Memory extraction failed: {e}")
 
     return reply
+
+
+def _is_memory_worthy(user_message):
+    """Avoid an extra LLM call for greetings and one-off study updates.
+
+    This deliberately has a high bar: missing a weak memory is safer than repeatedly
+    storing temporary facts or spending tokens after every ordinary question.
+    """
+    import re
+
+    text = (user_message or "").lower()
+    patterns = (
+        r"\bi (?:prefer|like|struggle|find|learn|study better)\b",
+        r"\bmy (?:goal|target|exam|schedule|routine)\b",
+        r"\bi want to (?:finish|complete|score|study|revise)\b",
+        r"\bi(?:'m| am) (?:working|preparing|studying)\b",
+        r"\b(?:every|usually|always|never)\b",
+        r"\b(?:until|starting|from) \d{1,2}(?:st|nd|rd|th)?\b",
+    )
+    return len(text) >= 12 and any(re.search(pattern, text) for pattern in patterns)
+
+
+def _normalise_memory(text):
+    import re
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", "", (text or "").lower())).strip()
 
 
 def _extract_and_save_memories(user_message, bot_reply, existing_memories):
@@ -123,7 +149,10 @@ def _extract_and_save_memories(user_message, bot_reply, existing_memories):
         "Extract new memories as a JSON array."
     )
 
-    raw = generate_text(MEMORY_EXTRACT_PROMPT, user_prompt, max_tokens=1024, reasoning_effort="none")
+    raw = generate_text(
+        MEMORY_EXTRACT_PROMPT, user_prompt, model=MEMORY_MODEL,
+        max_tokens=300, reasoning_effort="none",
+    )
 
     # Parse the JSON array
     text = raw.strip()
@@ -141,9 +170,25 @@ def _extract_and_save_memories(user_message, bot_reply, existing_memories):
         return
 
     valid_categories = {"preference", "pattern", "struggle", "goal", "insight"}
+    existing_normalised = {
+        _normalise_memory("".join(t.get("plain_text", "") for t in m["properties"]["Memory"]["title"]))
+        for m in (existing_memories or [])
+    }
+    saved = 0
     for mem in memories:
-        if isinstance(mem, dict) and mem.get("memory"):
+        if saved >= 3:
+            break
+        if isinstance(mem, dict) and isinstance(mem.get("memory"), str):
+            memory_text = mem["memory"].strip()
+            normalised = _normalise_memory(memory_text)
+            if not normalised or len(memory_text) > 300 or normalised in existing_normalised:
+                continue
             category = mem.get("category", "insight")
             if category not in valid_categories:
                 category = "insight"
-            save_memory(mem["memory"], category=category, source="bot-inferred")
+            source = mem.get("source")
+            if source not in {"user-stated", "bot-inferred"}:
+                source = "bot-inferred"
+            save_memory(memory_text, category=category, source=source)
+            existing_normalised.add(normalised)
+            saved += 1
