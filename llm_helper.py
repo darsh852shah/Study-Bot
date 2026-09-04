@@ -11,7 +11,7 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 # Qwen model is reserved for the user-facing answer.
 CLASSIFIER_MODEL = os.environ.get("GROQ_CLASSIFIER_MODEL", "openai/gpt-oss-20b")
 ANSWER_MODEL = os.environ.get("GROQ_ANSWER_MODEL", "qwen/qwen3.8-27b")
-MEMORY_MODEL = os.environ.get("GROQ_MEMORY_MODEL", CLASSIFIER_MODEL)
+MEMORY_MODEL = os.environ.get("GROQ_MEMORY_MODEL", "qwen/qwen3.6-27b")
 LOG_EXTRACTION_MODEL = os.environ.get("GROQ_LOG_EXTRACTION_MODEL", MEMORY_MODEL)
 ANSWER_MAX_TOKENS = int(os.environ.get("GROQ_ANSWER_MAX_TOKENS", "450"))
 LOG_EXTRACTION_MAX_TOKENS = int(os.environ.get("GROQ_LOG_EXTRACTION_MAX_TOKENS", "384"))
@@ -256,6 +256,6 @@ def extract_log_fields(message_text=None, previous_draft=None, correction_text=N
 
     raw = generate_text(
         EXTRACT_SYSTEM_PROMPT, user_prompt, model=LOG_EXTRACTION_MODEL,
-        max_tokens=LOG_EXTRACTION_MAX_TOKENS, reasoning_effort="none",
+        max_tokens=LOG_EXTRACTION_MAX_TOKENS, reasoning_effort="default",
     )
     return _parse_json_object(raw)
