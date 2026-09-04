@@ -117,6 +117,7 @@ def answer_query(user_message, chat_history=None):
         reply,
         DETAILED_REPLY_CHARACTER_LIMIT if detailed else NORMAL_REPLY_CHARACTER_LIMIT,
     )
+    reply = generate_text(QUERY_SYSTEM_PROMPT, user_prompt, model=ANSWER_MODEL, max_tokens=900)
 
     if _is_memory_worthy(user_message):
         try:

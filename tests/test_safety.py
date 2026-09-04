@@ -92,6 +92,9 @@ class WebhookSafetyTests(unittest.TestCase):
 
         process_update.assert_called_once_with(update, None, incoming_text="Studied AFM for 2 hours.")
 
+if __name__ == "__main__":
+    unittest.main()
+
 class MemorySafetyTests(unittest.TestCase):
     def test_only_long_term_messages_trigger_memory_extraction(self):
         from query_handler import _is_memory_worthy

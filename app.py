@@ -59,6 +59,10 @@ def load_state():
             "pending": saved.get("pending"),
             "chat_history": chat_history[-MAX_HISTORY:],
             "processed_updates": processed_updates[-MAX_PROCESSED_UPDATES:],
+        return {
+            "pending": saved.get("pending"),
+            "chat_history": saved.get("chat_history", [])[-MAX_HISTORY:],
+            "processed_updates": saved.get("processed_updates", [])[-MAX_PROCESSED_UPDATES:],
         }
     except (FileNotFoundError, json.JSONDecodeError, ValueError):
         return {"pending": None, "chat_history": [], "processed_updates": []}
