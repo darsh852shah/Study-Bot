@@ -2,6 +2,7 @@ import os
 import re
 import requests
 import time
+import math
 from datetime import datetime, timezone, timedelta
 
 NOTION_API_KEY = os.environ["NOTION_API_KEY"]
@@ -17,6 +18,7 @@ HEADERS = {
 }
 
 IST = timezone(timedelta(hours=5, minutes=30))
+REQUEST_TIMEOUT = (5, 30)
 
 VALID_BROKE_OPTIONS = [
     "Phone / scrolling", "Hunger / low energy", "Noise / people",
@@ -72,6 +74,38 @@ def parse_activity_breakdown(breakdown):
     return round(total_hours, 2), activity_names, ", ".join(breakdown_parts)
 
 
+def validate_log_fields(breakdown, mood, energy):
+    """Validate values before sending an irreversible Daily Log write to Notion."""
+    chunks = [chunk.strip() for chunk in (breakdown or "").split(",") if chunk.strip()]
+    if not chunks:
+        raise ValueError("include at least one activity and its hours (for example AFM:1.5)")
+
+    total = 0.0
+    for chunk in chunks:
+        if ":" not in chunk:
+            raise ValueError(f"invalid activity entry: {chunk!r}")
+        name, hours_text = chunk.split(":", 1)
+        if not name.strip():
+            raise ValueError("each activity needs a name")
+        try:
+            hours = float(hours_text.strip())
+        except ValueError as exc:
+            raise ValueError(f"invalid hours for {name.strip()}") from exc
+        if not math.isfinite(hours) or hours <= 0 or hours > 24:
+            raise ValueError(f"hours for {name.strip()} must be greater than 0 and at most 24")
+        total += hours
+    if total > 24:
+        raise ValueError("total study hours cannot exceed 24 in one day")
+
+    for label, value in (("mood", mood), ("energy", energy)):
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{label} must be a whole number from 1 to 5") from exc
+        if not numeric.is_integer() or not 1 <= numeric <= 5:
+            raise ValueError(f"{label} must be a whole number from 1 to 5")
+
+
 def match_broke_options(broke):
     """Fuzzy-matches free text against the valid 'What broke focus' multi-select options."""
     return _match_multiselect(broke, VALID_BROKE_OPTIONS, split_on_slash=True)
@@ -98,6 +132,7 @@ def create_log_entry(breakdown, mood, energy, win, broke, fix):
     """Creates one row in the Daily Log (DB). `breakdown` is a string like
     'AFM:1,ITT:6' — parsed into total hours, the Activity multi-select, and
     a readable Activity Breakdown text field."""
+    validate_log_fields(breakdown, mood, energy)
     today = today_ist()
     date_str = today.strftime("%Y-%m-%d")
     day_str = today.strftime("%A, %d %b")
@@ -120,7 +155,7 @@ def create_log_entry(breakdown, mood, energy, win, broke, fix):
             "Activity Breakdown": {"rich_text": [{"text": {"content": breakdown_text}}]},
         },
     }
-    r = requests.post("https://api.notion.com/v1/pages", headers=HEADERS, json=payload)
+    r = requests.post("https://api.notion.com/v1/pages", headers=HEADERS, json=payload, timeout=REQUEST_TIMEOUT)
     r.raise_for_status()
     return r.json()
 
@@ -161,7 +196,7 @@ def fetch_plan_text(max_chars=16000):
                 params["start_cursor"] = cursor
             r = requests.get(
                 f"https://api.notion.com/v1/blocks/{block_id}/children",
-                headers=HEADERS, params=params,
+                headers=HEADERS, params=params, timeout=REQUEST_TIMEOUT,
             )
             r.raise_for_status()
             data = r.json()
@@ -195,7 +230,7 @@ def get_recent_entries(days=5):
     }
     r = requests.post(
         f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query",
-        headers=HEADERS, json=payload,
+        headers=HEADERS, json=payload, timeout=REQUEST_TIMEOUT,
     )
     r.raise_for_status()
     return r.json().get("results", [])
@@ -245,7 +280,7 @@ def get_lecture_stats():
             payload["start_cursor"] = cursor
         r = requests.post(
             f"https://api.notion.com/v1/databases/{NOTION_LECTURE_DB_ID}/query",
-            headers=HEADERS, json=payload,
+            headers=HEADERS, json=payload, timeout=REQUEST_TIMEOUT,
         )
         r.raise_for_status()
         data = r.json()
@@ -331,7 +366,7 @@ def find_lecture_matches(subject, lecture_query):
             payload["start_cursor"] = cursor
         r = requests.post(
             f"https://api.notion.com/v1/databases/{NOTION_LECTURE_DB_ID}/query",
-            headers=HEADERS, json=payload,
+            headers=HEADERS, json=payload, timeout=REQUEST_TIMEOUT,
         )
         r.raise_for_status()
         data = r.json()
@@ -370,7 +405,7 @@ def mark_lecture_watched(page_id):
             "Date completed": {"date": {"start": date_str}},
         }
     }
-    r = requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json=payload)
+    r = requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json=payload, timeout=REQUEST_TIMEOUT)
     r.raise_for_status()
     return r.json()
 
@@ -381,7 +416,7 @@ def get_today_entry():
     payload = {"filter": {"property": "Date", "date": {"equals": date_str}}}
     r = requests.post(
         f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query",
-        headers=HEADERS, json=payload,
+        headers=HEADERS, json=payload, timeout=REQUEST_TIMEOUT,
     )
     r.raise_for_status()
     results = r.json().get("results", [])
@@ -402,7 +437,7 @@ def get_memories(limit=20):
     }
     r = requests.post(
         f"https://api.notion.com/v1/databases/{NOTION_MEMORY_DB_ID}/query",
-        headers=HEADERS, json=payload,
+        headers=HEADERS, json=payload, timeout=REQUEST_TIMEOUT,
     )
     r.raise_for_status()
     return r.json().get("results", [])
@@ -423,7 +458,7 @@ def save_memory(memory_text, category="insight", source="bot-inferred"):
             "Date": {"date": {"start": date_str}},
         },
     }
-    r = requests.post("https://api.notion.com/v1/pages", headers=HEADERS, json=payload)
+    r = requests.post("https://api.notion.com/v1/pages", headers=HEADERS, json=payload, timeout=REQUEST_TIMEOUT)
     r.raise_for_status()
     return r.json()
 
