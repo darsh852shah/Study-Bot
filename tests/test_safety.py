@@ -122,6 +122,36 @@ class MemorySafetyTests(unittest.TestCase):
         self.assertEqual(generate_text.call_args.kwargs["max_tokens"], 300)
 
 
+class QueryLengthTests(unittest.TestCase):
+    @patch("query_handler._extract_and_save_memories")
+    @patch("query_handler.generate_text")
+    @patch("query_handler.build_context", return_value="context")
+    def test_normal_question_uses_shorter_answer_budget(self, build_context, generate_text, extract_memories):
+        from query_handler import NORMAL_REPLY_TOKEN_LIMIT, answer_query
+
+        generate_text.return_value = "AFM is next."
+        self.assertEqual(answer_query("What's next in AFM?"), "AFM is next.")
+        self.assertEqual(generate_text.call_args.kwargs["max_tokens"], NORMAL_REPLY_TOKEN_LIMIT)
+        extract_memories.assert_not_called()
+
+    @patch("query_handler._extract_and_save_memories")
+    @patch("query_handler.generate_text")
+    @patch("query_handler.build_context", return_value="context")
+    def test_explicit_plan_can_use_detailed_budget(self, build_context, generate_text, extract_memories):
+        from query_handler import DETAILED_REPLY_TOKEN_LIMIT, answer_query
+
+        generate_text.return_value = "Here is your plan."
+        answer_query("Make me a detailed weekly plan")
+        self.assertEqual(generate_text.call_args.kwargs["max_tokens"], DETAILED_REPLY_TOKEN_LIMIT)
+
+    def test_reply_guardrail_trims_at_a_sentence_boundary(self):
+        from query_handler import _trim_reply
+
+        reply = "First short sentence. " + ("Extra words " * 100)
+        trimmed = _trim_reply(reply, 30)
+        self.assertEqual(trimmed, "First short sentence…")
+
+
 class IntentClassificationTests(unittest.TestCase):
     def test_clear_free_text_log_skips_remote_classifier(self):
         from llm_helper import classify_intent

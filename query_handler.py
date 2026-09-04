@@ -12,17 +12,23 @@ from notion_helper import (
 )
 from llm_helper import ANSWER_MODEL, MEMORY_MODEL, load_plan_summary, format_logs, format_lecture_stats, generate_text
 
+NORMAL_REPLY_TOKEN_LIMIT = 450
+DETAILED_REPLY_TOKEN_LIMIT = 900
+NORMAL_REPLY_CHARACTER_LIMIT = 1_200
+DETAILED_REPLY_CHARACTER_LIMIT = 2_400
+
 QUERY_SYSTEM_PROMPT = """You are a direct, grounded study assistant for a CA Final student, scoped ONLY to their study plan, progress, and how to improve it. You're given the current date and time, their live master plan, their recent daily logs, and their lecture tracker completion stats below — this is the ONLY data you know about their prep. Never invent numbers, deadlines, lecture counts, or plan phases that aren't in what's given to you; if something isn't in the data, say so plainly instead of guessing. Use the current time (not just the date) when it's relevant — e.g. how much of today is realistically left, whether it's early or late to still expect more study today, or how close it is to a scheduled block in the Daily Template.
 
 You also have LONG-TERM MEMORIES about this student from past conversations — preferences, recurring struggles, patterns, and goals they've mentioned before. Use these naturally to give more personalized advice, but don't list them back to the student.
 
 The lecture tracker's "not started, in syllabus order" list is already given to you in the real chapter sequence — when asked what's next, just read it off in that exact order. Never reorder it, guess at a different sequence, or invent chapters/lectures beyond what's listed.
 
-RESPONSE LENGTH — classify the student's message before answering:
+RESPONSE LENGTH — classify the student's message before answering. Brevity is a hard
+requirement, not a suggestion:
 1. Simple update/fact, no question asked (e.g. "ITT ends today", "feeling tired") → 1-2 sentences acknowledging it. If it's relevant to their plan, ask ONE short question about whether they want you to act on it (e.g. "Want me to re-plan around that?"). Do NOT analyze their schedule or generate a plan yet.
 2. Narrow factual question (e.g. "what's next in AFM") → answer directly in 1-2 sentences. No extra analysis.
-3. Broad/open-ended question (e.g. "what should I keep in mind when studying", "how am I doing") → 2-4 sentences hitting the single most relevant point, then offer to go deeper.
-4. Explicit request for a plan/analysis, or a "yes" confirming you should proceed with one you offered → now give full detail: breakdown, reasoning, specific numbers.
+3. Broad/open-ended question (e.g. "what should I keep in mind when studying", "how am I doing") → at most 3 short sentences hitting the single most relevant point, then offer to go deeper.
+4. Explicit request for a plan/analysis, or a "yes" confirming you should proceed with one you offered → give useful detail, but no more than 8 short bullets and no repeated context.
 Never jump straight to case 4 from case 1 in the same reply — wait for confirmation first.
 5. Closing/decline/acknowledgment (e.g. "no", "nope", "nope thanks", "bye", "thanks", "that's all", "ok") → reply with ONE short line acknowledging it — no question, no restating what you'll do, no offering alternatives. 
 Just close warmly (e.g. "Sounds good — here if you need anything." or "👍 Talk later."). 
@@ -100,7 +106,17 @@ def answer_query(user_message, chat_history=None):
         f'Student\'s message just now: "{user_message}"\n\n'
         "Respond as their study assistant."
     )
-    reply = generate_text(QUERY_SYSTEM_PROMPT, user_prompt, model=ANSWER_MODEL, max_tokens=900)
+    detailed = _is_detailed_request(user_message)
+    reply = generate_text(
+        QUERY_SYSTEM_PROMPT,
+        user_prompt,
+        model=ANSWER_MODEL,
+        max_tokens=DETAILED_REPLY_TOKEN_LIMIT if detailed else NORMAL_REPLY_TOKEN_LIMIT,
+    )
+    reply = _trim_reply(
+        reply,
+        DETAILED_REPLY_CHARACTER_LIMIT if detailed else NORMAL_REPLY_CHARACTER_LIMIT,
+    )
 
     if _is_memory_worthy(user_message):
         try:
@@ -109,6 +125,37 @@ def answer_query(user_message, chat_history=None):
             print(f"Memory extraction failed: {e}")
 
     return reply
+
+
+def _is_detailed_request(user_message):
+    """Reserve the larger response budget for an explicitly requested plan or analysis."""
+    import re
+
+    text = (user_message or "").lower()
+    return bool(re.search(
+        r"\b(?:replan|plan|schedule|timetable|detailed|full|deep|analyse|analyze|analysis|"
+        r"breakdown|week(?:ly)? plan|catch[ -]?up)\b",
+        text,
+    ))
+
+
+def _trim_reply(reply, character_limit):
+    """Keep an unexpectedly verbose model response readable in Telegram.
+
+    The model prompt and token budget are the primary controls. This final guardrail
+    prevents a single response from becoming a wall of text if a model ignores them.
+    It only cuts at a natural sentence or line boundary and clearly indicates truncation.
+    """
+    reply = (reply or "").strip()
+    if len(reply) <= character_limit:
+        return reply
+
+    candidate = reply[:character_limit]
+    boundaries = [candidate.rfind("\n"), candidate.rfind(". "), candidate.rfind("! "), candidate.rfind("? ")]
+    cut_at = max(boundaries)
+    if cut_at < character_limit // 2:
+        cut_at = character_limit
+    return candidate[:cut_at].rstrip(" .!?\n") + "…"
 
 
 def _is_memory_worthy(user_message):
