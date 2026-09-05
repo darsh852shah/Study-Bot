@@ -11,8 +11,8 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 # Qwen model is reserved for the user-facing answer.
 CLASSIFIER_MODEL = os.environ.get("GROQ_CLASSIFIER_MODEL", "openai/gpt-oss-20b")
 COACH_MODEL = os.environ.get("GROQ_COACH_MODEL", "openai/gpt-oss-120b")
-ANSWER_MODEL = os.environ.get("GROQ_ANSWER_MODEL", "qwen/qwen3.8-27b")
-MEMORY_MODEL = os.environ.get("GROQ_MEMORY_MODEL", "qwen/qwen3.6-27b")
+ANSWER_MODEL = os.environ.get("GROQ_ANSWER_MODEL", "qwen/qwen3.6-27b")
+MEMORY_MODEL = os.environ.get("GROQ_MEMORY_MODEL", "openai/gpt-oss-20b")
 LOG_EXTRACTION_MODEL = os.environ.get("GROQ_LOG_EXTRACTION_MODEL", MEMORY_MODEL)
 ANSWER_MAX_TOKENS = int(os.environ.get("GROQ_ANSWER_MAX_TOKENS", "8000"))
 LOG_EXTRACTION_MAX_TOKENS = int(os.environ.get("GROQ_LOG_EXTRACTION_MAX_TOKENS", "8000"))
