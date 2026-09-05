@@ -58,7 +58,7 @@ def main():
         logs = format_logs(get_recent_entries(days=5))
         user_prompt = (
             f"MASTER PLAN SUMMARY:\n{trim_prompt_text(plan, 8000)}\n\n"
-            f"LECTURE TRACKER (FR / AFM):\n{trim_prompt_text(lecture_text, 2000)}\n\n"
+            f"LECTURE TRACKER:\n{trim_prompt_text(lecture_text, 2000)}\n\n"
             f"RECENT LOGS (most recent first, includes today):\n{trim_prompt_text(logs, 4000)}\n\n"
             "Write tonight's coaching reflection."
         )
