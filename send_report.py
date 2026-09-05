@@ -1,7 +1,7 @@
 import logging
 
 from notion_helper import get_today_entry, get_recent_entries
-from llm_helper import CLASSIFIER_MODEL, load_plan_summary, format_logs, generate_text, trim_prompt_text
+from llm_helper import COACH_MODEL, load_plan_summary, format_logs, generate_text, trim_prompt_text
 from telegram_helper import send_message
 
 logger = logging.getLogger(__name__)
@@ -62,8 +62,8 @@ def main():
             "Write tonight's coaching reflection."
         )
         coach_msg = generate_text(
-            SYSTEM_PROMPT, user_prompt, model=CLASSIFIER_MODEL,
-            max_tokens=160, reasoning_effort="none",
+            SYSTEM_PROMPT, user_prompt, model=COACH_MODEL,
+            max_tokens="280", reasoning_effort="low",
         )
         send_message(coach_msg)
     except Exception:
