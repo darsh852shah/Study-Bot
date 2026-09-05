@@ -1,7 +1,7 @@
 from datetime import datetime, timezone, timedelta
 
 from notion_helper import get_recent_entries
-from llm_helper import CLASSIFIER_MODEL, load_plan_summary, format_logs, generate_text, trim_prompt_text
+from llm_helper import COACH_MODEL, load_plan_summary, format_logs, generate_text, trim_prompt_text
 from telegram_helper import send_message
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -36,8 +36,8 @@ def main():
 
     try:
         body = generate_text(
-            SYSTEM_PROMPT, user_prompt, model=CLASSIFIER_MODEL,
-            max_tokens=180, reasoning_effort="low",
+            SYSTEM_PROMPT, user_prompt, model=COACH_MODEL,
+            max_tokens=350, reasoning_effort="low",
         )
     except Exception as e:
         print(f"generate_text failed, using fallback nudge: {type(e).__name__}: {e}")
