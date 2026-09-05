@@ -37,7 +37,7 @@ def main():
     try:
         body = generate_text(
             SYSTEM_PROMPT, user_prompt, model=CLASSIFIER_MODEL,
-            max_tokens=180, reasoning_effort="none",
+            max_tokens=180, reasoning_effort="low",
         )
     except Exception as e:
         print(f"generate_text failed, using fallback nudge: {type(e).__name__}: {e}")
