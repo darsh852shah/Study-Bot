@@ -97,30 +97,35 @@ def classify_intent(text):
     """Decides whether a free-text message is a study-log entry or a conversational
     question/plan request.
 
-    Cheap greetings/questions are caught with a direct check first — reasoning models like
-    gpt-oss-120b can sometimes burn a small token budget on internal reasoning before ever
-    emitting LOG/QUERY, which used to make short ambiguous messages default to "log" and
-    silently start an empty log draft. Defaults to "query" on any failure or ambiguity: a
-    real log message misread as a query just gets a conversational reply (recoverable by
-    re-sending or using /log), whereas a real question misread as "log" used to get trapped
-    answering log-draft prompts instead — a worse outcome, so the safer default flipped."""
-    stripped = text.strip().lower().strip(" !.?")
-    if stripped in _GREETING_SHORTCUTS or text.strip().endswith("?"):
-        return "query"
-    if _looks_like_log(text):
-        return "log"
-
+    Attempts classification via Groq first. If Groq fails or returns an ambiguous answer,
+    falls back to cheap greetings/questions checks and regex heuristics. Defaults to "query" 
+    on any failure or ambiguity: a real log message misread as a query just gets a 
+    conversational reply (recoverable by re-sending or using /log), whereas a real question 
+    misread as "log" used to get trapped answering log-draft prompts instead — a worse 
+    outcome, so the safer default flipped."""
+    
     try:
         raw = generate_text(
             CLASSIFY_SYSTEM_PROMPT, f'Message: "{text}"', model=CLASSIFIER_MODEL,
-            max_tokens=12, reasoning_effort="low", temprature=0.2,
+            max_tokens=12, reasoning_effort="low", temperature=0.2,
         )
+        upper = raw.strip().upper()
+        
+        if "LOG" in upper and "QUERY" not in upper:
+            return "log"
+        if "QUERY" in upper and "LOG" not in upper:
+            return "query"
     except Exception:
-        return "log" if _looks_like_log(text) else "query"
+        pass  # Fall through to local rules if the API fails or times out
 
-    upper = raw.strip().upper()
-    if "LOG" in upper and "QUERY" not in upper:
+    # Fallback to local checks
+    stripped = text.strip().lower().strip(" !.?")
+    if stripped in _GREETING_SHORTCUTS or text.strip().endswith("?"):
+        return "query"
+        
+    if _looks_like_log(text):
         return "log"
+
     return "query"
 
 
