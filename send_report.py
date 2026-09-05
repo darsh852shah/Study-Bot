@@ -4,6 +4,8 @@ ffrom notion_helper import get_today_entry, get_recent_entries, get_lecture_stat
 from llm_helper import COACH_MODEL, load_plan_summary, format_logs, format_lecture_stats, generate_text, trim_prompt_text
 from telegram_helper import send_message
 
+lecture_text = format_lecture_stats(get_lecture_stats())
+
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a direct, grounded study coach for a CA Final student preparing for the May 2027 exam.
