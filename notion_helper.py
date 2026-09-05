@@ -8,15 +8,17 @@ from datetime import datetime, timezone, timedelta
 NOTION_API_KEY = os.environ["NOTION_API_KEY"]
 NOTION_DATABASE_ID = os.environ["NOTION_DATABASE_ID"]
 NOTION_LECTURE_DB_ID = os.environ.get("NOTION_LECTURE_DB_ID")  # "Lecture Tracker" database — optional, powers query_handler
-NOTION_MEMORY_DB_ID = os.environ.get("NOTION_MEMORY_DB_ID")    # "Bot Memory" database — optional, gives the bot long-term memory
-NOTION_VERSION = "2022-06-28"
+NOTION_MEMORY_DB_ID = os.environ.get("NOTION_MEMORY_DB_ID")  # "Bot Memory" database — optional, gives the bot long-term memory
+NOTION_CHATLOG_DB_ID = os.environ.get("NOTION_CHATLOG_DB_ID")  # "Chat Log" database — optional, gives the bot short-term conversational
+    # memory that survives Render free-tier cold starts (an in-memory list, like app.py used
+    # to keep, does not — it resets every time the process spins down and back up).
 
+NOTION_VERSION = "2022-06-28"
 HEADERS = {
     "Authorization": f"Bearer {NOTION_API_KEY}",
     "Notion-Version": NOTION_VERSION,
     "Content-Type": "application/json",
 }
-
 IST = timezone(timedelta(hours=5, minutes=30))
 REQUEST_TIMEOUT = (5, 30)
 
@@ -45,8 +47,8 @@ def _match_multiselect(raw_text, valid_options, split_on_slash=False):
             key = opt.lower().split(" /")[0].strip() if split_on_slash else opt.lower()
             if key in lowered:
                 matched.append(opt)
-        if not matched:
-            matched = ["Other"]
+    if not matched:
+        matched = ["Other"]
     return matched
 
 
@@ -136,7 +138,6 @@ def create_log_entry(breakdown, mood, energy, win, broke, fix):
     today = today_ist()
     date_str = today.strftime("%Y-%m-%d")
     day_str = today.strftime("%A, %d %b")
-
     broke_list = match_broke_options(broke)
     total_hours, activity_names, breakdown_text = parse_activity_breakdown(breakdown)
 
@@ -316,6 +317,8 @@ def get_lecture_stats():
         s["not_started_chapters"].sort(key=_chapter_sort_key)
 
     return stats
+
+
 _tracked_subjects_cache = {"value": None, "ts": 0}
 _TRACKED_SUBJECTS_TTL = 300  # seconds — avoids a full Lecture Tracker fetch on every message in a log flow
 
@@ -338,6 +341,7 @@ def get_tracked_subjects():
     _tracked_subjects_cache["ts"] = now
     return subjects
 
+
 def _normalize_lecture_text(text):
     return re.sub(r"[^a-z0-9]", "", (text or "").lower())
 
@@ -351,6 +355,7 @@ def find_lecture_matches(subject, lecture_query):
     (D#-P# labels are unique), for AFM it can be several (Class N repeats across chapters)."""
     if not NOTION_LECTURE_DB_ID:
         return []
+
     target = _normalize_lecture_text(lecture_query)
     if not target:
         return []
@@ -425,7 +430,6 @@ def get_today_entry():
 
 # ─── Bot Memory (long-term) ──────────────────────────────────────────────────
 
-
 def get_memories(limit=20):
     """Fetches the most recent memories from the Bot Memory database, newest first.
     Returns None if NOTION_MEMORY_DB_ID isn't set (feature is optional)."""
@@ -476,3 +480,57 @@ def format_memories(memories):
         date = date_obj["start"] if date_obj else "?"
         lines.append(f"[{cat}] {text} ({date})")
     return "\n".join(lines)
+
+
+# ─── Chat Log (short-term conversational memory) ─────────────────────────────
+# Why this exists: app.py's webhook runs on Render's free tier, which spins the process
+# down after ~15 min idle and cold-starts it fresh on the next request. An in-memory
+# Python list (what app.py used to keep conversational history in) is wiped on every
+# cold start — meaning a detailed answer given 20-30 minutes earlier (well within a
+# normal gap between Telegram messages) is silently forgotten. Notion survives
+# restarts/redeploys/cold-starts, so it becomes the source of truth for short-term
+# chat memory instead.
+
+def save_chat_turn(role, text):
+    """Saves one turn of the conversation to the Chat Log database. Does nothing if
+    NOTION_CHATLOG_DB_ID isn't set (feature is optional)."""
+    if not NOTION_CHATLOG_DB_ID:
+        return None
+    payload = {
+        "parent": {"database_id": NOTION_CHATLOG_DB_ID},
+        "properties": {
+            "Turn": {"title": [{"text": {"content": text[:2000]}}]},
+            "Role": {"select": {"name": role}},
+            "Timestamp": {"date": {"start": today_ist().isoformat()}},
+        },
+    }
+    r = requests.post("https://api.notion.com/v1/pages", headers=HEADERS, json=payload, timeout=REQUEST_TIMEOUT)
+    r.raise_for_status()
+    return r.json()
+
+
+def get_recent_chat_turns(minutes=90, limit=20):
+    """Fetches chat turns from the last `minutes` minutes, oldest first, for conversational
+    continuity. Returns [] if NOTION_CHATLOG_DB_ID isn't set or nothing recent exists."""
+    if not NOTION_CHATLOG_DB_ID:
+        return []
+    cutoff = (today_ist() - timedelta(minutes=minutes)).isoformat()
+    payload = {
+        "filter": {"property": "Timestamp", "date": {"after": cutoff}},
+        "sorts": [{"property": "Timestamp", "direction": "descending"}],
+        "page_size": limit,
+    }
+    r = requests.post(
+        f"https://api.notion.com/v1/databases/{NOTION_CHATLOG_DB_ID}/query",
+        headers=HEADERS, json=payload, timeout=REQUEST_TIMEOUT,
+    )
+    r.raise_for_status()
+    results = r.json().get("results", [])
+
+    turns = []
+    for page in reversed(results):  # Notion gave us newest-first; flip to oldest-first
+        props = page["properties"]
+        text = "".join(t.get("plain_text", "") for t in props["Turn"]["title"])
+        role = (props.get("Role", {}).get("select") or {}).get("name", "user")
+        turns.append((role, text))
+    return turns

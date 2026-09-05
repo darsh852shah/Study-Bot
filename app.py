@@ -6,19 +6,20 @@ Actions can't do this part because it only runs on a timer, it can't sit and lis
 inbound HTTP requests.
 
 Routing logic per incoming message:
-  1. "/..." commands, or a log draft already awaiting confirmation -> existing log flow
-     (poll_log.process_update), unchanged behavior.
-  2. Otherwise -> classify_intent() decides "log" (fresh log attempt) vs "query"
-     (a question / re-plan request), and routes accordingly.
+1. "/..." commands, or a log draft already awaiting confirmation -> existing log flow
+   (poll_log.process_update), unchanged behavior.
+2. Otherwise -> classify_intent() decides "log" (fresh log attempt) vs "query"
+   (a question / re-plan request), and routes accordingly.
 
-State (pending log draft, recent message IDs, and a little chat memory for conversational
-continuity) is stored in a local JSON file. This survives a restart on a single instance;
-use shared durable storage before scaling the service to multiple instances.
+State: the in-progress log draft ("pending") is kept in-memory per process — that's fine
+to lose on a cold start, since a lost draft is recoverable (the person just re-sends it).
+Conversational chat history is stored in Notion's Chat Log database instead of in-memory,
+since Render's free tier spins the service down after ~15 min idle and cold-starts it on
+the next request — an in-memory list would be silently wiped every time that happens,
+which is well within a normal gap between Telegram messages.
 """
 
 import os
-import json
-import logging
 import threading
 
 from flask import Flask, request, jsonify
@@ -26,99 +27,48 @@ from flask import Flask, request, jsonify
 from telegram_helper import send_message, download_voice
 from llm_helper import classify_intent
 from stt_helper import transcribe_audio
+from notion_helper import save_chat_turn
 import poll_log
 from query_handler import answer_query
 
 app = Flask(__name__)
-logger = logging.getLogger(__name__)
 
 TELEGRAM_CHAT_ID = str(os.environ["TELEGRAM_CHAT_ID"])
-# Required: Telegram sends this header when the webhook was registered with secret_token.
-# Refuse to start without it so a public endpoint cannot silently run unauthenticated.
-WEBHOOK_SECRET = os.environ["TELEGRAM_WEBHOOK_SECRET"]
 
-MAX_HISTORY = 6  # (role, text) turns kept for conversational continuity
+# Optional but strongly recommended: set this to a random string, and pass the same value
+# as secret_token when you call Telegram's setWebhook (see SETUP_GUIDE_WEBHOOK.md). Without
+# it, anyone who finds your Render URL could POST fake Telegram updates at your bot.
+WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
 
-STATE_FILE = os.environ.get("STUDY_BOT_STATE_FILE", "webhook_state.json")
-MAX_PROCESSED_UPDATES = 1000
-MAX_QUEUED_UPDATES = 20
-
-
-def load_state():
-    try:
-        with open(STATE_FILE, encoding="utf-8") as state_file:
-            saved = json.load(state_file)
-        if not isinstance(saved, dict):
-            raise ValueError("state is not an object")
-        return {
-            "pending": saved.get("pending"),
-            "chat_history": saved.get("chat_history", [])[-MAX_HISTORY:],
-            "processed_updates": saved.get("processed_updates", [])[-MAX_PROCESSED_UPDATES:],
-        }
-    except (FileNotFoundError, json.JSONDecodeError, ValueError):
-        return {"pending": None, "chat_history": [], "processed_updates": []}
-
-
-def save_state():
-    temporary_file = f"{STATE_FILE}.tmp"
-    with open(temporary_file, "w", encoding="utf-8") as state_file:
-        json.dump(STATE, state_file)
-    os.replace(temporary_file, STATE_FILE)
-
-
-STATE = load_state()
+STATE = {"pending": None}
 STATE_LOCK = threading.Lock()  # Telegram can deliver updates in quick succession; keep them serialized
-UPDATE_SLOTS = threading.BoundedSemaphore(MAX_QUEUED_UPDATES)
 
 
 def add_to_history(role, text):
-    STATE["chat_history"].append((role, text))
-    del STATE["chat_history"][:-MAX_HISTORY]
+    """Persists one chat turn to Notion so it survives cold starts. Best-effort — a failure
+    here should never block the user from getting their reply."""
+    try:
+        save_chat_turn(role, text)
+    except Exception as e:
+        print(f"Failed to save chat turn to Notion: {e}")
 
 
 @app.route("/telegram-webhook", methods=["POST"])
 def telegram_webhook():
-    if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
+    if WEBHOOK_SECRET and request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
         return jsonify({"ok": False, "error": "bad secret token"}), 403
 
-    update = request.get_json(silent=True)
-    if not isinstance(update, dict):
-        return jsonify({"ok": True})
-    message = update.get("message")
-    if not isinstance(message, dict):
-        return jsonify({"ok": True})
-    chat = message.get("chat")
-    if not isinstance(chat, dict):
-        return jsonify({"ok": True})
-    chat_id = str(chat.get("id", ""))
-    update_id = update.get("update_id")
+    update = request.get_json(silent=True) or {}
+    message = update.get("message", {})
+    chat_id = str(message.get("chat", {}).get("id", ""))
 
     # This endpoint is a public URL — only ever act on messages from the owner's chat.
-    if not isinstance(update_id, int) or not chat_id or chat_id != TELEGRAM_CHAT_ID:
+    if chat_id and chat_id != TELEGRAM_CHAT_ID:
         return jsonify({"ok": True})
-
-    if not UPDATE_SLOTS.acquire(blocking=False):
-        return jsonify({"ok": False, "error": "busy"}), 503
-
-    with STATE_LOCK:
-        if update_id in STATE["processed_updates"]:
-            UPDATE_SLOTS.release()
-            return jsonify({"ok": True})
-        # Record delivery before side effects. A duplicate must never create a second log.
-        STATE["processed_updates"].append(update_id)
-        del STATE["processed_updates"][:-MAX_PROCESSED_UPDATES]
-        save_state()
 
     # Reply to Telegram immediately; do the actual work (which calls Groq/Notion) in the
     # background so Telegram doesn't retry the webhook on a slow LLM/Notion response.
-    try:
-        threading.Thread(target=handle_update_safely, args=(update,), daemon=True).start()
-    except Exception:
-        UPDATE_SLOTS.release()
-        with STATE_LOCK:
-            STATE["processed_updates"].remove(update_id)
-            save_state()
-        raise
+    threading.Thread(target=handle_update_safely, args=(update,), daemon=True).start()
     return jsonify({"ok": True})
 
 
@@ -126,15 +76,11 @@ def handle_update_safely(update):
     try:
         with STATE_LOCK:
             route_update(update)
-            save_state()
     except Exception as e:
-        logger.exception("Failed to process Telegram update")
         try:
-            send_message("⚠️ Something broke handling that. Please try again.")
+            send_message(f"⚠️ Something broke handling that: {e}")
         except Exception:
-            logger.exception("Failed to send Telegram error notification")
-    finally:
-        UPDATE_SLOTS.release()
+            pass  # if even sending the error fails, there's nothing more to do
 
 
 def route_update(update):
@@ -190,7 +136,6 @@ def route_update(update):
     # where an empty/misfired draft would silently swallow every message after it,
     # including unrelated questions.
     intent = classify_intent(incoming_text)
-
     if intent == "log":
         STATE["pending"] = poll_log.process_update(update, STATE["pending"], incoming_text=incoming_text)
         return
@@ -198,14 +143,16 @@ def route_update(update):
     # Conversational query: answer using live plan + logs + lecture tracker data.
     add_to_history("user", incoming_text)
     try:
-        reply = answer_query(incoming_text, chat_history=STATE["chat_history"])
+        reply = answer_query(incoming_text)
     except Exception as e:
         reply = f"⚠️ Couldn't work that out just now ({e}). Try asking again in a moment."
+
     if STATE["pending"] is not None:
         reply += (
             "\n\n_(By the way, you've still got an unsaved log draft from earlier — "
             "reply \"yes\" to save it or \"cancel\" to discard it.)_"
         )
+
     add_to_history("assistant", reply)
     send_message(reply)
 
