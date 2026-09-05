@@ -1,6 +1,6 @@
 import logging
 
-ffrom notion_helper import get_today_entry, get_recent_entries, get_lecture_stats
+from notion_helper import get_today_entry, get_recent_entries, get_lecture_stats
 from llm_helper import COACH_MODEL, load_plan_summary, format_logs, format_lecture_stats, generate_text, trim_prompt_text
 from telegram_helper import send_message
 
