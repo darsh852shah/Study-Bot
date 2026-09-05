@@ -10,6 +10,7 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 # console without editing code. The smaller model handles short classification; the newer
 # Qwen model is reserved for the user-facing answer.
 CLASSIFIER_MODEL = os.environ.get("GROQ_CLASSIFIER_MODEL", "openai/gpt-oss-20b")
+COACH_MODEL = os.environ.get("GROQ_CLASSIFIER_MODEL", "openai/gpt-oss-120b")
 ANSWER_MODEL = os.environ.get("GROQ_ANSWER_MODEL", "qwen/qwen3.8-27b")
 MEMORY_MODEL = os.environ.get("GROQ_MEMORY_MODEL", "qwen/qwen3.6-27b")
 LOG_EXTRACTION_MODEL = os.environ.get("GROQ_LOG_EXTRACTION_MODEL", MEMORY_MODEL)
