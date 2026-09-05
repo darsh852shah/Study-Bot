@@ -113,7 +113,7 @@ def classify_intent(text):
     try:
         raw = generate_text(
             CLASSIFY_SYSTEM_PROMPT, f'Message: "{text}"', model=CLASSIFIER_MODEL,
-            max_tokens=12, reasoning_effort="low",
+            max_tokens=12, reasoning_effort="low", temprature=0.2,
         )
     except Exception:
         return "log" if _looks_like_log(text) else "query"
@@ -147,7 +147,7 @@ def format_logs(entries):
     return "\n".join(lines)
 
 
-def generate_text(system_prompt, user_prompt, model=ANSWER_MODEL, max_tokens=220, reasoning_effort="none"):
+def generate_text(system_prompt, user_prompt, model=ANSWER_MODEL, max_tokens=220, reasoning_effort="none", temperature=0.7):
     """Generate text with the requested Groq model.
 
     ``reasoning_effort`` support varies by Groq model; the configured models use only
@@ -171,7 +171,7 @@ def generate_text(system_prompt, user_prompt, model=ANSWER_MODEL, max_tokens=220
             {"role": "user", "content": user_prompt},
         ],
         "max_tokens": max_tokens,
-        "temperature": 0.7,
+        "temperature": temperature,
         "reasoning_effort": reasoning_effort,
     }
 
@@ -257,6 +257,6 @@ def extract_log_fields(message_text=None, previous_draft=None, correction_text=N
 
     raw = generate_text(
         EXTRACT_SYSTEM_PROMPT, user_prompt, model=LOG_EXTRACTION_MODEL,
-        max_tokens=LOG_EXTRACTION_MAX_TOKENS, reasoning_effort="default",
+        max_tokens=LOG_EXTRACTION_MAX_TOKENS, reasoning_effort="default", temperature=0.1,
     )
     return _parse_json_object(raw)
