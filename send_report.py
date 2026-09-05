@@ -63,7 +63,7 @@ def main():
         )
         coach_msg = generate_text(
             SYSTEM_PROMPT, user_prompt, model=COACH_MODEL,
-            max_tokens="280", reasoning_effort="low",
+            max_tokens=280, reasoning_effort="low",
         )
         send_message(coach_msg)
     except Exception:
