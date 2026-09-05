@@ -70,10 +70,6 @@ class WebhookSafetyTests(unittest.TestCase):
         self.assertEqual(self.post(update).status_code, 200)
         self.assertEqual(thread.call_count, 1)
 
-
-if __name__ == "__main__":
-    unittest.main()
-
 class MemorySafetyTests(unittest.TestCase):
     def test_only_long_term_messages_trigger_memory_extraction(self):
         from query_handler import _is_memory_worthy
@@ -101,4 +97,8 @@ class MemorySafetyTests(unittest.TestCase):
             "Prefers studying at night.", category="preference", source="user-stated"
         )
         self.assertEqual(generate_text.call_args.kwargs["model"], MEMORY_MODEL)
-        self.assertEqual(generate_text.call_args.kwargs["max_tokens"], 300)
+        from llm_helper import MEMORY_MAX_TOKENS
+        self.assertEqual(generate_text.call_args.kwargs["max_tokens"], MEMORY_MAX_TOKENS)
+
+if __name__ == "__main__":
+    unittest.main()
