@@ -315,6 +315,18 @@ def match_new_log_trigger(incoming_text):
             return incoming_text[len(trig):].strip(" :,-–—.")
     return None
 
+def merge_draft(previous, updated):
+    """Merges an LLM-revised draft over the previous one, field by field — a correction
+    only overwrites a field if the new value is actually present, so a model slip on an
+    unrelated field during a multi-turn correction can't silently wipe good data."""
+    merged = dict(previous)
+    for key in ("mood", "energy"):
+        if updated.get(key) is not None:
+            merged[key] = updated[key]
+    for key in ("breakdown", "win", "broke", "fix"):
+        if updated.get(key):
+            merged[key] = updated[key]
+    return merged
 
 # ---- core per-update logic ----
 
@@ -390,17 +402,18 @@ def process_update(update, pending, incoming_text=None):
 
         # Anything else while a draft is pending is treated as a correction/addition
         try:
-            updated = extract_log_fields(previous_draft=pending, correction_text=incoming_text)
+            revision = extract_log_fields(previous_draft=pending, correction_text=incoming_text)
         except Exception as e:
             send_message(
                 f"⚠️ Had trouble understanding that ({e}). Reply *yes* to save what I already had, "
                 "or try rephrasing the correction."
             )
             return pending
+        updated = merge_draft(pending, revision)
         if not maybe_ask_lecture(updated):
             send_message(format_confirmation(updated))
         return updated
-
+        
     # No pending draft — this is a fresh free-text or voice log
     try:
         draft = extract_log_fields(message_text=incoming_text)
