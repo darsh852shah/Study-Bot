@@ -2,6 +2,8 @@ from notion_helper import get_today_entry, get_recent_entries, get_lecture_stats
 from llm_helper import COACH_MODEL, load_plan_summary, format_logs, format_lecture_stats, generate_text, trim_prompt_text
 from telegram_helper import send_message
 
+lecture_text = format_lecture_stats(get_lecture_stats())
+
 SYSTEM_PROMPT = """You are a grounded study coach for a CA Final student. It's midday and they haven't logged any study yet today.
 
 Decide whether a check-in is actually warranted, then write ONE short message — 1 to 2 sentences, plain text, max 1 emoji.
