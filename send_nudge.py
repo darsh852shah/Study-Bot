@@ -1,7 +1,7 @@
 from datetime import datetime, timezone, timedelta
 
-from notion_helper import get_recent_entries
-from llm_helper import COACH_MODEL, load_plan_summary, format_logs, generate_text, trim_prompt_text
+from notion_helper import get_recent_entries, get_lecture_stats
+from llm_helper import COACH_MODEL, load_plan_summary, format_logs, format_lecture_stats, generate_text, trim_prompt_text
 from telegram_helper import send_message
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -30,6 +30,7 @@ def main():
     logs = format_logs(get_recent_entries(days=5))
     user_prompt = (
         f"MASTER PLAN SUMMARY:\n{trim_prompt_text(plan, 8000)}\n\n"
+        "LECTURE TRACKER:\n{trim_prompt_text(lecture_text, 2000)}\n\n"
         f"RECENT LOGS (most recent first):\n{trim_prompt_text(logs, 4000)}\n\n"
         "Write today's morning nudge."
     )
