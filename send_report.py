@@ -1,7 +1,7 @@
 import logging
 
-from notion_helper import get_today_entry, get_recent_entries
-from llm_helper import COACH_MODEL, load_plan_summary, format_logs, generate_text, trim_prompt_text
+ffrom notion_helper import get_today_entry, get_recent_entries, get_lecture_stats
+from llm_helper import COACH_MODEL, load_plan_summary, format_logs, format_lecture_stats, generate_text, trim_prompt_text
 from telegram_helper import send_message
 
 logger = logging.getLogger(__name__)
@@ -58,6 +58,7 @@ def main():
         logs = format_logs(get_recent_entries(days=5))
         user_prompt = (
             f"MASTER PLAN SUMMARY:\n{trim_prompt_text(plan, 8000)}\n\n"
+            f"LECTURE TRACKER (FR / AFM):\n{trim_prompt_text(lecture_text, 2000)}\n\n"
             f"RECENT LOGS (most recent first, includes today):\n{trim_prompt_text(logs, 4000)}\n\n"
             "Write tonight's coaching reflection."
         )
