@@ -1,5 +1,5 @@
 from notion_helper import get_today_entry, get_recent_entries
-from llm_helper import CLASSIFIER_MODEL, load_plan_summary, format_logs, generate_text, trim_prompt_text
+from llm_helper import COACH_MODEL, load_plan_summary, format_logs, generate_text, trim_prompt_text
 from telegram_helper import send_message
 
 SYSTEM_PROMPT = """You are a grounded study coach for a CA Final student. It's midday and they haven't logged any study yet today.
@@ -27,8 +27,8 @@ def main():
 
     try:
         msg = generate_text(
-            SYSTEM_PROMPT, prompt, model=CLASSIFIER_MODEL,
-            max_tokens=160, reasoning_effort="none",
+            SYSTEM_PROMPT, prompt, model=COACH_MODEL,
+            max_tokens=280, reasoning_effort="low",
         )
     except Exception as e:
         # Previously failed with zero output — impossible to diagnose from the Actions log.
