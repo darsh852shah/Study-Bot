@@ -322,7 +322,7 @@ def get_lecture_stats():
             if chapter and lecture_name:
                 s["chapter_unwatched_lectures"].setdefault(chapter, []).append(lecture_name)
 
-       for s in stats.values():
+        for s in stats.values():
             s["not_started_chapters"].sort(key=_chapter_sort_key)
 
         # Determine the actual next unwatched lecture (not just the chapter it's in) within
