@@ -53,7 +53,7 @@ def format_lecture_stats(stats, max_chapters=6):
             f"{subject}: {s['watched']}/{s['total']} lectures watched ({pct}%) — "
             f"{watched_hrs}h watched, {remaining_hrs}h remaining"
         )
-                remaining = s["not_started_chapters"][:max_chapters]
+        remaining = s["not_started_chapters"][:max_chapters]
         if remaining:
             more = f" (+{len(s['not_started_chapters']) - max_chapters} more)" if len(s["not_started_chapters"]) > max_chapters else ""
             lines.append(f"  Not started, in syllabus order (next up first): {', '.join(remaining)}{more}")
