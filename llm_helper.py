@@ -267,6 +267,6 @@ def extract_log_fields(message_text=None, previous_draft=None, correction_text=N
 
     raw = generate_text(
         EXTRACT_SYSTEM_PROMPT, user_prompt, model=LOG_EXTRACTION_MODEL,
-        max_tokens=LOG_EXTRACTION_MAX_TOKENS, reasoning_effort="default", temperature=0.1,
+        max_tokens=LOG_EXTRACTION_MAX_TOKENS, reasoning_effort="low", temperature=0.1,
     )
     return _parse_json_object(raw)
