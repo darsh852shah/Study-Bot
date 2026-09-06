@@ -253,7 +253,12 @@ def parse_duration_minutes(duration_text):
     minutes = int(match.group(2)) if match.group(2) else 0
     return round(hours * 60 + minutes)
 
-
+def _lecture_sort_key(lecture_name):
+    """Sorts lecture names like 'Class 5' by their embedded number, so the first unwatched
+    lecture in a chapter is picked correctly rather than by arbitrary Notion query order."""
+    m = re.search(r"(\d+)", lecture_name or "")
+    return int(m.group(1)) if m else 0
+    
 def _chapter_sort_key(chapter_name):
     """Chapters are numbered '00 ...', '1. ...' etc in real syllabus order — sort on that so
     'what's next' reflects the actual sequence, not raw Notion query order (which is
@@ -303,6 +308,7 @@ def get_lecture_stats():
             "watched": 0, "total": 0,
             "watched_minutes": 0, "remaining_minutes": 0,
             "not_started_chapters": [],
+            "chapter_unwatched_lectures": {},
         })
         s["total"] += 1
         if status == "Watched":
@@ -312,11 +318,26 @@ def get_lecture_stats():
             s["remaining_minutes"] += minutes
             if chapter and chapter not in s["not_started_chapters"]:
                 s["not_started_chapters"].append(chapter)
+            lecture_name = "".join(t.get("plain_text", "") for t in props.get("Lecture", {}).get("rich_text", []))
+            if chapter and lecture_name:
+                s["chapter_unwatched_lectures"].setdefault(chapter, []).append(lecture_name)
 
-    for s in stats.values():
-        s["not_started_chapters"].sort(key=_chapter_sort_key)
+       for s in stats.values():
+            s["not_started_chapters"].sort(key=_chapter_sort_key)
 
-    return stats
+        # Determine the actual next unwatched lecture (not just the chapter it's in) within
+        # the first not-yet-fully-watched chapter in syllabus order — the LLM otherwise has
+        # no ground truth for "what's the next lecture" and hallucinates around it.
+        for s in stats.values():
+            s["next_lecture"] = None
+            for chapter in s["not_started_chapters"]:
+                candidates = s["chapter_unwatched_lectures"].get(chapter, [])
+                if candidates:
+                    candidates.sort(key=_lecture_sort_key)
+                    s["next_lecture"] = {"chapter": chapter, "lecture": candidates[0]}
+                    break
+
+        return stats
 
 
 _tracked_subjects_cache = {"value": None, "ts": 0}
