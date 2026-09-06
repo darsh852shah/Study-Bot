@@ -53,12 +53,14 @@ def format_lecture_stats(stats, max_chapters=6):
             f"{subject}: {s['watched']}/{s['total']} lectures watched ({pct}%) — "
             f"{watched_hrs}h watched, {remaining_hrs}h remaining"
         )
-        remaining = s["not_started_chapters"][:max_chapters]
+                remaining = s["not_started_chapters"][:max_chapters]
         if remaining:
             more = f" (+{len(s['not_started_chapters']) - max_chapters} more)" if len(s["not_started_chapters"]) > max_chapters else ""
             lines.append(f"  Not started, in syllabus order (next up first): {', '.join(remaining)}{more}")
+        next_lec = s.get("next_lecture")
+        if next_lec:
+            lines.append(f"  Next specific lecture to watch: {next_lec['chapter']} — {next_lec['lecture']}")
     return "\n".join(lines)
-
 
 CLASSIFY_SYSTEM_PROMPT = """Classify a CA Final student's Telegram message into exactly one category. Reply with ONLY one word: LOG or QUERY.
 
@@ -86,12 +88,15 @@ def _looks_like_log(text):
     has_recap_marker = bool(
         re.search(r"\b(studied|did|finished|completed|watched|revised|covered|spent)\b", lowered)
     )
-    has_log_field = bool(
+        has_log_field = bool(
         re.search(r"\b(?:mood|energy)\s*(?:was|is|:)?\s*[1-5]\b", lowered)
         or re.search(r"\b(?:distracted|focus|win|tomorrow)\b", lowered)
     )
-    return has_hours and (has_activity or has_recap_marker or has_log_field)
-
+    has_lecture_completion = bool(
+        re.search(r"\b(lecture|class|chapter)\b.{0,20}\b(done|completed|finished|watched)\b", lowered)
+        or re.search(r"\b(done|completed|finished|watched)\b.{0,20}\b(lecture|class|chapter)\b", lowered)
+    )
+    return (has_hours and (has_activity or has_recap_marker or has_log_field)) or has_lecture_completion
 
 def classify_intent(text):
     """Decides whether a free-text message is a study-log entry or a conversational
