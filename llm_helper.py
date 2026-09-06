@@ -88,7 +88,7 @@ def _looks_like_log(text):
     has_recap_marker = bool(
         re.search(r"\b(studied|did|finished|completed|watched|revised|covered|spent)\b", lowered)
     )
-        has_log_field = bool(
+    has_log_field = bool(
         re.search(r"\b(?:mood|energy)\s*(?:was|is|:)?\s*[1-5]\b", lowered)
         or re.search(r"\b(?:distracted|focus|win|tomorrow)\b", lowered)
     )
