@@ -6,9 +6,6 @@ import requests
 
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-# Keep these configurable so a deployment can use the exact model IDs shown in its Groq
-# console without editing code. The smaller model handles short classification; the newer
-# Qwen model is reserved for the user-facing answer.
 CLASSIFIER_MODEL = os.environ.get("GROQ_CLASSIFIER_MODEL", "openai/gpt-oss-20b")
 COACH_MODEL = os.environ.get("GROQ_COACH_MODEL", "openai/gpt-oss-120b")
 ANSWER_MODEL = os.environ.get("GROQ_ANSWER_MODEL", "qwen/qwen3.6-27b")
@@ -41,7 +38,13 @@ def load_plan_summary():
 
 
 def format_lecture_stats(stats, max_chapters=6):
-    """Turns notion_helper.get_lecture_stats()'s output into a compact text block for the prompt."""
+    """Turns notion_helper.get_lecture_stats()'s output into a compact text block for the prompt.
+
+    NOTE: this includes subject names, chapter names, and specific next-lecture names.
+    Do NOT pass this into any coach-facing prompt (nudge/check-in/report) — those must
+    never surface subject/chapter/lecture names. Use format_overall_lecture_pct() instead
+    for coach prompts. This function is for surfaces where naming lectures is fine
+    (e.g. a direct "/progress" style query the user explicitly asks for)."""
     if not stats:
         return "No lecture tracker data available."
     lines = []
@@ -61,6 +64,27 @@ def format_lecture_stats(stats, max_chapters=6):
         if next_lec:
             lines.append(f"  Next specific lecture to watch: {next_lec['chapter']} — {next_lec['lecture']}")
     return "\n".join(lines)
+
+
+def format_overall_lecture_pct(stats):
+    """Reduces notion_helper.get_lecture_stats()'s output to a single aggregate line —
+    no subject names, no chapter names, no lecture names. This is the ONLY lecture-tracker
+    summary that should be fed into coach-facing prompts (nudge/check-in/report), since it
+    physically cannot leak a subject/chapter/lecture name into the model's context."""
+    if not stats:
+        return "No lecture tracker data available."
+    total_watched = sum(s["watched"] for s in stats.values())
+    total_lectures = sum(s["total"] for s in stats.values())
+    total_watched_minutes = sum(s["watched_minutes"] for s in stats.values())
+    total_remaining_minutes = sum(s["remaining_minutes"] for s in stats.values())
+    pct = round(100 * total_watched / total_lectures, 1) if total_lectures else 0.0
+    watched_hrs = round(total_watched_minutes / 60, 1)
+    remaining_hrs = round(total_remaining_minutes / 60, 1)
+    return (
+        f"Overall lecture progress: {pct}% complete "
+        f"({total_watched}/{total_lectures} lectures watched, "
+        f"{watched_hrs}h watched, {remaining_hrs}h remaining)."
+    )
 
 CLASSIFY_SYSTEM_PROMPT = """Classify a CA Final student's Telegram message into exactly one category. Reply with ONLY one word: LOG or QUERY.
 
@@ -100,22 +124,14 @@ def _looks_like_log(text):
 
 def classify_intent(text):
     """Decides whether a free-text message is a study-log entry or a conversational
-    question/plan request.
-
-    Attempts classification via Groq first. If Groq fails or returns an ambiguous answer,
-    falls back to cheap greetings/questions checks and regex heuristics. Defaults to "query" 
-    on any failure or ambiguity: a real log message misread as a query just gets a 
-    conversational reply (recoverable by re-sending or using /log), whereas a real question 
-    misread as "log" used to get trapped answering log-draft prompts instead — a worse 
-    outcome, so the safer default flipped."""
-    
+    question/plan request."""
     try:
         raw = generate_text(
             CLASSIFY_SYSTEM_PROMPT, f'Message: "{text}"', model=CLASSIFIER_MODEL,
             max_tokens=12, reasoning_effort="low", temperature=0.2,
         )
         upper = raw.strip().upper()
-        
+
         if "LOG" in upper and "QUERY" not in upper:
             return "log"
         if "QUERY" in upper and "LOG" not in upper:
@@ -123,11 +139,10 @@ def classify_intent(text):
     except Exception:
         pass  # Fall through to local rules if the API fails or times out
 
-    # Fallback to local checks
     stripped = text.strip().lower().strip(" !.?")
     if stripped in _GREETING_SHORTCUTS or text.strip().endswith("?"):
         return "query"
-        
+
     if _looks_like_log(text):
         return "log"
 
@@ -158,18 +173,7 @@ def format_logs(entries):
 
 
 def generate_text(system_prompt, user_prompt, model=ANSWER_MODEL, max_tokens=220, reasoning_effort="none", temperature=0.7):
-    """Generate text with the requested Groq model.
-
-    ``reasoning_effort`` support varies by Groq model; the configured models use only
-    "none" or "default". Set the ``GROQ_*_MODEL`` environment variables to exact model
-    IDs from the Groq console when they differ from the defaults.
-    "none" disables reasoning (faster, lower quality — good for classify_intent).
-    "default" enables reasoning. Keep it opt-in because hidden reasoning tokens count against
-    the Qwen quota and are not useful for short bot replies or JSON extraction.
-    Passing any other value ("low", "medium", "high") causes a 400 Bad Request from the Groq API.
-
-    Retries automatically on 429 (rate limit) with exponential backoff — Groq's free tier
-    has tight limits (~30 req/min) and the bot can hit them with back-to-back calls."""
+    """Generate text with the requested Groq model."""
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json",
@@ -189,7 +193,6 @@ def generate_text(system_prompt, user_prompt, model=ANSWER_MODEL, max_tokens=220
     for attempt in range(max_retries + 1):
         r = requests.post(GROQ_URL, headers=headers, json=payload, timeout=60)
         if r.status_code == 429 and attempt < max_retries:
-            # Respect Retry-After header if provided, otherwise exponential backoff
             wait = float(r.headers.get("Retry-After", 2 ** (attempt + 1)))
             time.sleep(wait)
             continue
@@ -226,15 +229,11 @@ You may reasonably infer mood/energy from tone and wording (e.g. "felt pretty go
 
 def _strip_reasoning(text):
     """Qwen3 and similar reasoning models sometimes wrap chain-of-thought in <think> tags
-    even when asked for JSON only — strip it defensively before parsing.
-    Also handles truncated blocks where </think> is missing (model hit max_tokens
-    while still reasoning and never wrote the closing tag or any real answer)."""
+    even when asked for JSON only — strip it defensively before parsing."""
     if "<think>" in text:
         if "</think>" in text:
             text = text.split("</think>", 1)[1]
         else:
-            # Truncated: no closing tag → everything from <think> onward is reasoning.
-            # Keep only any content that appeared before the tag (usually empty).
             text = text.split("<think>", 1)[0]
     return text.strip()
 
@@ -253,9 +252,7 @@ def _parse_json_object(raw):
 
 
 def extract_log_fields(message_text=None, previous_draft=None, correction_text=None):
-    """Extracts (or revises) structured log fields from free text/voice-transcribed text via the LLM.
-    Pass message_text for a fresh extraction, or previous_draft + correction_text to revise an
-    existing draft based on a follow-up message. Returns a dict matching EXTRACT_SYSTEM_PROMPT's schema."""
+    """Extracts (or revises) structured log fields from free text/voice-transcribed text via the LLM."""
     if previous_draft is not None and correction_text is not None:
         user_prompt = (
             f"Previous understanding (JSON): {json.dumps(previous_draft)}\n\n"

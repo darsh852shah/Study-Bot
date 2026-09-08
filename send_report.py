@@ -1,22 +1,21 @@
 import logging
-
 from notion_helper import get_today_entry, get_recent_entries, get_lecture_stats
-from llm_helper import COACH_MODEL, load_plan_summary, format_logs, format_lecture_stats, generate_text, trim_prompt_text
+from llm_helper import COACH_MODEL, load_plan_summary, format_logs, format_overall_lecture_pct, generate_text, trim_prompt_text
 from telegram_helper import send_message
 
-lecture_text = format_lecture_stats(get_lecture_stats())
-
+lecture_text = format_overall_lecture_pct(get_lecture_stats())
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a direct, grounded study coach for a CA Final student preparing for the May 2027 exam.
 You're given their master study plan and their last few days of logged study data, including today's.
-
 Write a SHORT end-of-day reflection — 1 to 2 sentences with emoji.
-
 Rules:
+- NEVER mention any subject name, topic name, chapter name, or lecture name — not the plan's, not from recent logs. This is a hard rule, no exceptions.
+- You may reference the overall lecture-completion percentage if it's given to you — that figure never refers to a single subject or lecture.
 - This is NOT the stats readout (that's shown separately) — this is a brief coaching observation.
-- If today or the recent trend is weak (low hours, low mood/energy, recurring 'broke focus' reasons), name the pattern plainly and suggest ONE small adjustment for tomorrow — not a lecture, not guilt.
-- If today or the trend is solid, say specifically what's working, not generic praise.
+- Talk only in terms of hours, streaks, mood/energy trend, recurring 'broke focus' reasons, and optionally the one overall lecture-completion percentage.
+- If today or the recent trend is weak (low hours, low mood/energy, recurring 'broke focus' reasons), name the pattern plainly and suggest ONE small, generic adjustment for tomorrow (e.g. an earlier start time, a shorter first block, tackling the hardest hour first) — not a lecture, not guilt.
+- If today or the trend is solid, say specifically what's working in terms of hours/consistency/mood-energy, not generic praise.
 - Never say "must" or "failure." Keep it calm and useful, like a coach who's paying attention, not a hype machine."""
 
 
@@ -26,7 +25,6 @@ def plain_text(rich_text_list):
 
 def main():
     entry = get_today_entry()
-
     if not entry:
         send_message(
             "No log found for today yet.\n\n"
@@ -34,7 +32,6 @@ def main():
             "_Example:_ `/log AFM:1,ITT:6|3|2|Watched 1 AFM lecture, sat ITT|Sleepiness|Sleep earlier`"
         )
         return
-
     props = entry["properties"]
     hours = props["Time effective (hrs)"]["number"]
     mood = props["Mood (1–5)"]["number"]
@@ -43,7 +40,6 @@ def main():
     broke = ", ".join(t["name"] for t in props["What broke focus"]["multi_select"])
     fix = plain_text(props["Fix for tomorrow"]["rich_text"])
     breakdown = plain_text(props.get("Activity Breakdown", {}).get("rich_text", []))
-
     stats_msg = (
         f"📊 *Today's report*\n\n"
         f"Effective hours: {hours if hours is not None else '—'}\n"
@@ -54,7 +50,6 @@ def main():
         f"Fix for tomorrow: {fix or '—'}"
     )
     send_message(stats_msg)
-
     try:
         plan = load_plan_summary()
         logs = format_logs(get_recent_entries(days=5))
@@ -62,7 +57,8 @@ def main():
             f"MASTER PLAN SUMMARY:\n{trim_prompt_text(plan, 8000)}\n\n"
             f"LECTURE TRACKER:\n{trim_prompt_text(lecture_text, 2000)}\n\n"
             f"RECENT LOGS (most recent first, includes today):\n{trim_prompt_text(logs, 4000)}\n\n"
-            "Write tonight's coaching reflection."
+            "Write tonight's coaching reflection. Remember: no subject, topic, chapter, or lecture "
+            "names — use only hours/streaks/mood-energy/focus-pattern language."
         )
         coach_msg = generate_text(
             SYSTEM_PROMPT, user_prompt, model=COACH_MODEL,
