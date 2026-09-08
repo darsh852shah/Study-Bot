@@ -1,22 +1,13 @@
 """Always-on webhook server for Study-Bot.
 
-Replaces poll_log.py's 15-min GitHub Actions polling with an instant Telegram webhook.
-Deploy this as a small web service (Render/Railway/Fly.io all work unchanged) — GitHub
-Actions can't do this part because it only runs on a timer, it can't sit and listen for
-inbound HTTP requests.
+Handles /log commands and log drafts (voice note or free text, with confirmation) via
+Telegram's webhook. The morning nudge, midday check-in, and evening report continue to
+run separately via GitHub Actions cron — this file only deals with inbound messages.
 
-Routing logic per incoming message:
-1. "/..." commands, or a log draft already awaiting confirmation -> existing log flow
-   (poll_log.process_update), unchanged behavior.
-2. Otherwise -> classify_intent() decides "log" (fresh log attempt) vs "query"
-   (a question / re-plan request), and routes accordingly.
-
-State: the in-progress log draft ("pending") is kept in-memory per process — that's fine
-to lose on a cold start, since a lost draft is recoverable (the person just re-sends it).
-Conversational chat history is stored in Notion's Chat Log database instead of in-memory,
-since Render's free tier spins the service down after ~15 min idle and cold-starts it on
-the next request — an in-memory list would be silently wiped every time that happens,
-which is well within a normal gap between Telegram messages.
+There is no conversational Q&A here anymore: every non-empty incoming message is treated
+as an attempt to log study activity (a fresh log, a correction to a pending draft, a
+confirm/cancel, or a lecture-name reply), matching the bot's sole purpose of capturing
+logs, not chatting about them.
 """
 
 import os
@@ -25,32 +16,20 @@ import threading
 from flask import Flask, request, jsonify
 
 from telegram_helper import send_message, download_voice
-from llm_helper import classify_intent
 from stt_helper import transcribe_audio
-from notion_helper import save_chat_turn
 import poll_log
-from query_handler import answer_query
 
 app = Flask(__name__)
 
 TELEGRAM_CHAT_ID = str(os.environ["TELEGRAM_CHAT_ID"])
 
 # Optional but strongly recommended: set this to a random string, and pass the same value
-# as secret_token when you call Telegram's setWebhook (see SETUP_GUIDE_WEBHOOK.md). Without
-# it, anyone who finds your Render URL could POST fake Telegram updates at your bot.
+# as secret_token when you call Telegram's setWebhook. Without it, anyone who finds your
+# Render URL could POST fake Telegram updates at your bot.
 WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
 
 STATE = {"pending": None}
 STATE_LOCK = threading.Lock()  # Telegram can deliver updates in quick succession; keep them serialized
-
-
-def add_to_history(role, text):
-    """Persists one chat turn to Notion so it survives cold starts. Best-effort — a failure
-    here should never block the user from getting their reply."""
-    try:
-        save_chat_turn(role, text)
-    except Exception as e:
-        print(f"Failed to save chat turn to Notion: {e}")
 
 
 @app.route("/telegram-webhook", methods=["POST"])
@@ -102,59 +81,9 @@ def route_update(update):
     if not incoming_text:
         return  # sticker, photo, empty message, etc.
 
-    # Commands always go through the existing log flow untouched.
-    if incoming_text.startswith("/"):
-        STATE["pending"] = poll_log.process_update(update, STATE["pending"], incoming_text=incoming_text)
-        return
-
-    lowered = incoming_text.lower().strip(" .!")
-
-    # These exact reserved phrases only ever make sense as continuing/ending a draft that's
-    # already in progress — handle them without ever asking the classifier, so "yes"/"cancel"
-    # can't accidentally get read as a question.
-    reserved_continuation = STATE["pending"] is not None and (
-        lowered in poll_log.CONFIRM_WORDS
-        or lowered in poll_log.CANCEL_WORDS
-        or poll_log.match_new_log_trigger(incoming_text) is not None
-    )
-    if reserved_continuation:
-        STATE["pending"] = poll_log.process_update(update, STATE["pending"], incoming_text=incoming_text)
-        return
-
-    # A pending lecture question (poll_log's disambiguation flow) must also capture the very
-    # next reply unconditionally. Replies like "D18-P1", "skip", "2", or "Class 5" don't read
-    # as a log recap OR a clear question, so classify_intent() tends to default them to QUERY
-    # (see its docstring) — which would silently abandon the in-progress lecture flow and send
-    # the reply to answer_query() instead, e.g. asking the LLM to make sense of "skip" as a
-    # study question. Same fix as reserved_continuation above, one step earlier in the flow.
-    if STATE["pending"] is not None and STATE["pending"].get("lecture_pending"):
-        STATE["pending"] = poll_log.process_update(update, STATE["pending"], incoming_text=incoming_text)
-        return
-
-    # Everything else gets classified fresh, every time — a pending draft does NOT force
-    # the next message to be treated as a correction to it. This is the fix for the bug
-    # where an empty/misfired draft would silently swallow every message after it,
-    # including unrelated questions.
-    intent = classify_intent(incoming_text)
-    if intent == "log":
-        STATE["pending"] = poll_log.process_update(update, STATE["pending"], incoming_text=incoming_text)
-        return
-
-    # Conversational query: answer using live plan + logs + lecture tracker data.
-    add_to_history("user", incoming_text)
-    try:
-        reply = answer_query(incoming_text)
-    except Exception as e:
-        reply = f"⚠️ Couldn't work that out just now ({e}). Try asking again in a moment."
-
-    if STATE["pending"] is not None:
-        reply += (
-            "\n\n_(By the way, you've still got an unsaved log draft from earlier — "
-            "reply \"yes\" to save it or \"cancel\" to discard it.)_"
-        )
-
-    add_to_history("assistant", reply)
-    send_message(reply)
+    # Everything goes through the log flow — commands, a fresh log, a correction to a
+    # pending draft, confirm/cancel, or a reply to a lecture-name question.
+    STATE["pending"] = poll_log.process_update(update, STATE["pending"], incoming_text=incoming_text)
 
 
 @app.route("/", methods=["GET"])
