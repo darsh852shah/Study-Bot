@@ -2,7 +2,7 @@ name: Midday Check-in
 
 on:
   schedule:
-    - cron: '30 7 * * *'  # 1:00 PM IST
+    - cron: '37 7 * * *' # 1:00 PM IST
   workflow_dispatch:
 
 jobs:
