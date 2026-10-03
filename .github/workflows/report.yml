@@ -2,7 +2,7 @@ name: Evening Report
 
 on:
   schedule:
-    - cron: '0 16 * * *'  # 9:30 PM IST
+    - cron: '14 16 * * *'  # 9:30 PM IST
   workflow_dispatch:
 
 jobs:
