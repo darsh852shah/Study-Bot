@@ -2,7 +2,7 @@ name: Morning Nudge
 
 on:
   schedule:
-    - cron: '30 1 * * *'  # 7:00 AM IST
+    - cron: '14 1 * * *'  # 7:00 AM IST
   workflow_dispatch:
 
 jobs:
